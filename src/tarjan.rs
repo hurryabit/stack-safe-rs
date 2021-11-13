@@ -54,6 +54,7 @@ impl Node {
 
 pub type Graph = Vec<Vec<Node>>;
 
+#[derive(Default)]
 struct State {
     index: usize,
     indices: Vec<usize>,
@@ -64,6 +65,7 @@ struct State {
 }
 
 pub fn tarjan(graph: &Graph) -> Vec<Vec<Node>> {
+    use crate::recurse_st;
     use std::cmp::min;
 
     let n = graph.len();
@@ -79,31 +81,37 @@ pub fn tarjan(graph: &Graph) -> Vec<Vec<Node>> {
     s.lowlinks.resize(n, usize::MAX);
 
     fn dfs(v: Node, graph: &Graph, s: &mut State) {
-        s.indices[v.id] = s.index;
-        s.lowlinks[v.id] = s.index;
-        s.index += 1;
-        s.stack.push(v);
-        s.on_stack.insert(v);
+        recurse_st(|v_graph: (Node, &Graph)| {
+            let (v, graph) = v_graph;
+            move |(_, mut s): ((), State)| {
+                s.indices[v.id] = s.index;
+                s.lowlinks[v.id] = s.index;
+                s.index += 1;
+                s.stack.push(v);
+                s.on_stack.insert(v);
 
-        for &w in &graph[v.id] {
-            if s.indices[w.id] == usize::MAX {
-                dfs(w, graph, s);
-                s.lowlinks[v.id] = min(s.lowlinks[v.id], s.lowlinks[w.id]);
-            } else if s.on_stack.contains(&w) {
-                s.lowlinks[v.id] = min(s.lowlinks[v.id], s.indices[w.id]);
-            }
-        }
+                for &w in &graph[v.id] {
+                    if s.indices[w.id] == usize::MAX {
+                        ((), s) = yield ((w, graph), s);
+                        s.lowlinks[v.id] = min(s.lowlinks[v.id], s.lowlinks[w.id]);
+                    } else if s.on_stack.contains(&w) {
+                        s.lowlinks[v.id] = min(s.lowlinks[v.id], s.indices[w.id]);
+                    }
+                }
 
-        if s.lowlinks[v.id] == s.indices[v.id] {
-            let mut component = Vec::new();
-            let mut w = Node { id: usize::MAX };
-            while w != v {
-                w = s.stack.pop().unwrap();
-                s.on_stack.remove(&w);
-                component.push(w)
+                if s.lowlinks[v.id] == s.indices[v.id] {
+                    let mut component = Vec::new();
+                    let mut w = Node { id: usize::MAX };
+                    while w != v {
+                        w = s.stack.pop().unwrap();
+                        s.on_stack.remove(&w);
+                        component.push(w)
+                    }
+                    s.components.push(component);
+                }
+                ((), s)
             }
-            s.components.push(component);
-        }
+        })((v, graph), s)
     }
 
     for id in 0..n {
@@ -129,30 +137,24 @@ mod test {
 
     #[test]
     fn test_simple() {
-        let graph = vec![
-            vec![v1],
-            vec![v2, v3],
-            vec![v1, v4],
-            vec![v2],
-            vec![],
-        ];
+        let graph = vec![vec![v1], vec![v2, v3], vec![v1, v4], vec![v2], vec![]];
         let expected = vec![vec![v4], vec![v3, v2, v1], vec![v0]];
 
         assert_eq!(tarjan(&graph), expected);
     }
 
     #[test]
-    #[ignore = "tarjan is not yet stack safe"]
+    // #[ignore = "tarjan is not yet stack safe"]
     fn test_large() {
         #![allow(clippy::needless_range_loop)]
-        let n = 1000;
+        let n = 10000;
         let mut graph = Vec::with_capacity(n);
         graph.resize_with(n, Vec::new);
         for id in 0..(n - 1) {
             graph[id].push(Node::new(id + 1));
         }
         let mut components = std::thread::Builder::new()
-            .stack_size(1024)
+            .stack_size(10240)
             .spawn(move || tarjan(&graph))
             .unwrap()
             .join()
