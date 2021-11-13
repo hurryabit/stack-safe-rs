@@ -1,0 +1,12 @@
+[package]
+name = "stack-safe"
+version = "0.0.1"
+authors = ["Martin Huschenbett <martin.huschenbett@posteo.me>"]
+edition = "2021"
+publish = false
+description = "An attribute macro to make recursive function stack-safe"
+homepage = "https://github.com/hurryabit/stack-safe#readme"
+repository = "https://github.com/hurryabit/stack-safe.git"
+license = "Apache 2.0"
+
+[dependencies]
