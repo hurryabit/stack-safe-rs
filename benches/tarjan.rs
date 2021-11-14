@@ -100,8 +100,7 @@ mod tarjan {
         s.lowlinks.resize(n, usize::MAX);
 
         fn dfs(v: Node, graph: &Graph, s: &mut State) {
-            recurse_st(|v_graph: (Node, &Graph)| {
-                let (v, graph) = v_graph;
+            recurse_st(|(v, graph): (Node, &Graph)| {
                 move |(_, mut s): ((), State)| {
                     s.indices[v.id] = s.index;
                     s.lowlinks[v.id] = s.index;
@@ -171,6 +170,16 @@ mod tarjan {
             (0..n).rev().map(|id| vec![Node::new(id)]).collect()
         }
 
+        pub fn path_rev(n: usize) -> Graph {
+            let mut graph = vec![vec![]];
+            graph.extend((0..(n-1)).map(|id| vec![Node::new(id)]));
+            graph
+        }
+
+        pub fn path_rev_sccs(n: usize) -> SCCs {
+            (0..n).map(|id| vec![Node::new(id)]).collect()
+        }
+
         pub fn complete(n: usize) -> Graph {
             let outgoing: Vec<_> = (0..n).map(Node::new).collect();
             (0..n).map(|_| outgoing.clone()).collect()
@@ -189,8 +198,9 @@ pub fn bench_tarjan(c: &mut Criterion) {
     assert_eq!(stack_safe(&examples::simple()), examples::simple_sccs());
 
     #[allow(clippy::type_complexity)]
-    let cases: [(&str, fn(usize) -> Graph, fn(usize) -> SCCs, usize); 2] = [
+    let cases: [(&str, fn(usize) -> Graph, fn(usize) -> SCCs, usize); 3] = [
         ("P_{size}", examples::path, examples::path_sccs, 10_000),
+        ("P_{size}_rev", examples::path_rev, examples::path_rev_sccs, 10_000),
         ("K_{size}", examples::complete, examples::complete_sccs, 500),
     ];
 
