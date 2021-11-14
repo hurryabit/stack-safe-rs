@@ -76,6 +76,16 @@ mod tree {
             }
             (tree, n)
         }
+
+        pub fn binary(n: usize) -> (Tree, usize) {
+            if n <= 1 {
+                (Tree::new(0), 1)
+            } else {
+                let mut tree = Tree::new(0);
+                tree.children = vec![binary(n - 1).0, binary(n - 1).0];
+                (tree, n)
+            }
+        }
     }
 }
 
@@ -87,8 +97,10 @@ pub fn bench_tree_depth(c: &mut Criterion) {
     assert_eq!(simple.depth_stack_safe(), simple_depth);
 
     #[allow(clippy::type_complexity)]
-    let cases: [(&str, fn(usize) -> (Tree, usize), usize); 1] =
-        [("P_{size}", examples::path, 100_000)];
+    let cases: [(&str, fn(usize) -> (Tree, usize), usize); 2] = [
+        ("P_{size}", examples::path, 100_000),
+        ("B_{size}", examples::binary, 20),
+    ];
 
     let mut group = c.benchmark_group("tree_depth");
     for (label, tree_f, size) in cases {
