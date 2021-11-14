@@ -21,3 +21,7 @@ harness = false
 [[bench]]
 name = "list"
 harness = false
+
+[[bench]]
+name = "tree"
+harness = false
