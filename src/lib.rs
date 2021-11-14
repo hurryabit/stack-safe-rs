@@ -2,8 +2,7 @@
 use std::mem;
 use std::ops::{Generator, GeneratorState};
 use std::pin::Pin;
-
-pub mod tarjan;
+use std::thread;
 
 pub fn recurse<Arg, Res, Gen>(f: impl Fn(Arg) -> Gen) -> impl Fn(Arg) -> Res
 where
@@ -61,6 +60,18 @@ where
     }
 }
 
+pub fn with_stack_size<T, F>(size: usize, f: F) -> thread::Result<T>
+where
+    T: Send + 'static,
+    F: FnOnce() -> T + Send + 'static,
+{
+    std::thread::Builder::new()
+        .stack_size(size)
+        .spawn(f)
+        .unwrap()
+        .join()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -89,20 +100,14 @@ mod tests {
 
     #[test]
     fn triangular_safe_is_safe() {
-        let handle = std::thread::Builder::new()
-            .stack_size(512)
-            .spawn(|| triangular_safe(LARGE))
-            .unwrap();
-        assert_eq!(handle.join().unwrap(), LARGE * (LARGE + 1) / 2);
+        let result = with_stack_size(512, || triangular_safe(LARGE));
+        assert_eq!(result.unwrap(), LARGE * (LARGE + 1) / 2);
     }
 
     #[test]
     #[ignore = "stack overflow is not an unwinding panic"]
     fn triangular_is_unsafe() {
-        let handler = std::thread::Builder::new()
-            .stack_size(512)
-            .spawn(|| triangular(LARGE))
-            .unwrap();
-        assert!(handler.join().is_err());
+        let result = with_stack_size(512, || triangular(LARGE));
+        assert!(result.is_err());
     }
 }
