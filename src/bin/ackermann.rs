@@ -3,7 +3,7 @@
 // A(3, 12) =  32765,   6.3 sec, stack-safe
 // A(3, 13) =  65533,   2.8 sec, manual-loop
 // A(3, 13) =  65533,   4.3 sec, recursive
-// A(3, 13) =  65533,   4.0 sec, systematic-tco-loop
+// A(3, 13) =  65533,   4.4 sec, systematic-tco-loop
 // A(3, 13) =  65533,   6.0 sec, systematic-loop
 // A(3, 13) =  65533,  18.7 sec, stack-safe
 // A(3, 14) = 131069,  20.9 sec, recursive
@@ -106,62 +106,44 @@ mod ackermann {
     }
 
     pub mod systematic_tco {
+        use stack_safe::Call;
+        use std::ops::{Generator, GeneratorState};
+        use std::pin::Pin;
+
         enum Kont {
             A { m: u64, n: u64 },
             C { m: u64 },
-        }
-
-        enum Outcome {
-            Yield(u64, u64, Kont),
-            TailCall(u64, u64),
-            Return(u64),
         }
 
         impl Kont {
             pub fn init(m: u64, n: u64) -> Self {
                 Self::A { m, n }
             }
+        }
 
-            pub fn resume(self, r: u64) -> Outcome {
-                match self {
+        impl Generator<u64> for Kont {
+            type Yield = Call<(u64, u64)>;
+            type Return = u64;
+
+            fn resume(self: Pin<&mut Self>, r: u64) -> GeneratorState<Self::Yield, Self::Return> {
+                match *self {
                     Self::A { m, n } => {
                         if m == 0 {
-                            Outcome::Return(n + 1)
+                            GeneratorState::Complete(n + 1)
                         } else if n == 0 {
-                            Outcome::TailCall(m - 1, 1)
+                            GeneratorState::Yielded(Call::tail((m - 1, 1)))
                         } else {
-                            Outcome::Yield(m, n - 1, Self::C { m })
+                            *self.get_mut() = Self::C { m };
+                            GeneratorState::Yielded(Call::normal((m, n - 1)))
                         }
                     }
-                    Self::C { m } => Outcome::TailCall(m - 1, r),
+                    Self::C { m } => GeneratorState::Yielded(Call::tail((m - 1, r))),
                 }
             }
         }
 
         pub fn systematic_loop(m: u64, n: u64) -> u64 {
-            let mut stack = Vec::new();
-            let mut kont = Kont::init(m, n);
-            let mut res = 0;
-            loop {
-                match kont.resume(res) {
-                    Outcome::Yield(m, n, push_kont) => {
-                        stack.push(push_kont);
-                        kont = Kont::init(m, n);
-                        res = 0;
-                    }
-                    Outcome::TailCall(m, n) => {
-                        kont = Kont::init(m, n);
-                        res = 0;
-                    }
-                    Outcome::Return(r) => match stack.pop() {
-                        None => return r,
-                        Some(pop_kont) => {
-                            kont = pop_kont;
-                            res = r;
-                        }
-                    },
-                }
-            }
+            stack_safe::recurse_tco(|(m, n)| Kont::init(m, n))((m, n))
         }
     }
 }

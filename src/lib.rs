@@ -33,6 +33,55 @@ where
     }
 }
 
+pub struct Call<T> {
+    arg: T,
+    is_tail: bool,
+}
+
+impl<T> Call<T> {
+    pub fn normal(arg: T) -> Self {
+        Self {
+            arg,
+            is_tail: false,
+        }
+    }
+
+    pub fn tail(arg: T) -> Self {
+        Self { arg, is_tail: true }
+    }
+}
+
+pub fn recurse_tco<Arg, Res, Gen>(f: impl Fn(Arg) -> Gen) -> impl Fn(Arg) -> Res
+where
+    Res: Default,
+    Gen: Generator<Res, Yield = Call<Arg>, Return = Res> + Unpin,
+{
+    move |arg: Arg| {
+        let mut stack = Vec::new();
+        let mut gen = f(arg);
+        let mut res = Res::default();
+
+        loop {
+            match Pin::new(&mut gen).resume(res) {
+                GeneratorState::Yielded(call) => {
+                    if !call.is_tail {
+                        stack.push(gen);
+                    }
+                    gen = f(call.arg);
+                    res = Res::default();
+                }
+                GeneratorState::Complete(res1) => match stack.pop() {
+                    None => return res1,
+                    Some(top) => {
+                        gen = top;
+                        res = res1;
+                    }
+                },
+            }
+        }
+    }
+}
+
 pub fn recurse_st<Arg, Res, St, Gen>(f: impl Fn(Arg) -> Gen) -> impl Fn(Arg, &mut St) -> Res
 where
     Res: Default,
