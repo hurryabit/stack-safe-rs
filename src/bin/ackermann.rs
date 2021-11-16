@@ -1,19 +1,22 @@
-// results & timings:
-// A(3, 12) =  32765,   1.3 sec, recursive
-// A(3, 12) =  32765,   6.3 sec, stack-safe
-// A(3, 13) =  65533,   2.8 sec, manual-loop
-// A(3, 13) =  65533,   4.3 sec, recursive
-// A(3, 13) =  65533,   4.4 sec, systematic-tco-loop
-// A(3, 13) =  65533,   6.0 sec, systematic-loop
-// A(3, 13) =  65533,  18.7 sec, stack-safe
-// A(3, 14) = 131069,  20.9 sec, recursive
-// A(3, 14) = 131069,  99.3 sec, stack-safe
-// ---- this is the ceiling for the recursive version
-// A(3, 15) = 262141,  6:43 min, stack-safe
-// A(3, 16) = 524285, 27:33 min, stack-safe
+/*
+ results & timings:
+
++─────────────+─────────+───────+────────────+─────────────+─────────+────────────+────────+
+|             | result  | loop  | recursive  | manual-tco  | manual  | yield-tco  | yield  |
++─────────────+─────────+───────+────────────+─────────────+─────────+────────────+────────+
+| "A(3, 12)"  | 32765   |       | 1.3        |             |         |            | 6.3    |
+| "A(3, 13)"  | 65533   | 2.8   | 4.3        | 4.4         | 6.0     | 5.3        | 18.7   |
+| "A(3, 14)"  | 131069  |       | 20.9       |             |         |            | 99.3   |
+| "A(3, 15)"  | 262141  |       | SO         |             |         |            | 403    |
+| "A(3, 16)"  | 524285  |       | SO         |             |         |            | 1650   |
++─────────────+─────────+───────+────────────+─────────────+─────────+────────────+────────+
+ */
+
 #![feature(generators, generator_trait)]
 
 mod ackermann {
+    use stack_safe::{recurse, recurse_tco, Call};
+
     pub fn recursive(m: u64, n: u64) -> u64 {
         if m == 0 {
             n + 1
@@ -24,22 +27,7 @@ mod ackermann {
         }
     }
 
-    pub fn stack_safe(m: u64, n: u64) -> u64 {
-        stack_safe::recurse(|(m, n): (u64, u64)| {
-            move |_: u64| {
-                if m == 0 {
-                    n + 1
-                } else if n == 0 {
-                    yield (m - 1, 1)
-                } else {
-                    let k = yield (m, n - 1);
-                    yield (m - 1, k)
-                }
-            }
-        })((m, n))
-    }
-
-    pub fn manual_loop(mut m: u64, mut n: u64) -> u64 {
+    pub fn r#loop(mut m: u64, mut n: u64) -> u64 {
         let mut stack = Vec::new();
         while !(m == 0 && stack.is_empty()) {
             if m == 0 {
@@ -56,11 +44,41 @@ mod ackermann {
         n + 1
     }
 
-    pub mod systematic {
+    pub fn r#yield(m: u64, n: u64) -> u64 {
+        recurse(|(m, n): (u64, u64)| {
+            move |_: u64| {
+                if m == 0 {
+                    n + 1
+                } else if n == 0 {
+                    yield (m - 1, 1)
+                } else {
+                    let k = yield (m, n - 1);
+                    yield (m - 1, k)
+                }
+            }
+        })((m, n))
+    }
+
+    pub fn yield_tco(m: u64, n: u64) -> u64 {
+        recurse_tco(|(m, n): (u64, u64)| {
+            move |_: u64| {
+                if m == 0 {
+                    n + 1
+                } else if n == 0 {
+                    yield Call::tail((m - 1, 1))
+                } else {
+                    let k = yield Call::normal((m, n - 1));
+                    yield Call::tail((m - 1, k))
+                }
+            }
+        })((m, n))
+    }
+
+    pub mod manual {
         use std::ops::{Generator, GeneratorState};
         use std::pin::Pin;
 
-        enum Kont {
+        pub enum Kont {
             A { m: u64, n: u64 },
             B,
             C { m: u64 },
@@ -99,18 +117,18 @@ mod ackermann {
                 }
             }
         }
-
-        pub fn systematic_loop(m: u64, n: u64) -> u64 {
-            stack_safe::recurse(|(m, n)| Kont::init(m, n))((m, n))
-        }
     }
 
-    pub mod systematic_tco {
+    pub fn manual(m: u64, n: u64) -> u64 {
+        recurse(|(m, n)| manual::Kont::init(m, n))((m, n))
+    }
+
+    pub mod manual_tco {
         use stack_safe::Call;
         use std::ops::{Generator, GeneratorState};
         use std::pin::Pin;
 
-        enum Kont {
+        pub enum Kont {
             A { m: u64, n: u64 },
             C { m: u64 },
         }
@@ -141,10 +159,10 @@ mod ackermann {
                 }
             }
         }
+    }
 
-        pub fn systematic_loop(m: u64, n: u64) -> u64 {
-            stack_safe::recurse_tco(|(m, n)| Kont::init(m, n))((m, n))
-        }
+    pub fn manual_tco(m: u64, n: u64) -> u64 {
+        recurse_tco(|(m, n)| manual_tco::Kont::init(m, n))((m, n))
     }
 }
 
@@ -167,10 +185,11 @@ fn main() {
                 .required(true)
                 .possible_values(&[
                     "recursive",
-                    "stack-safe",
-                    "manual-loop",
-                    "systematic-loop",
-                    "systematic-tco-loop",
+                    "loop",
+                    "yield",
+                    "yield-tco",
+                    "manual",
+                    "manual-tco",
                 ]),
         )
         .arg(
@@ -189,10 +208,11 @@ fn main() {
 
     let implementation = match matches.value_of("IMPL").unwrap() {
         "recursive" => ackermann::recursive,
-        "stack-safe" => ackermann::stack_safe,
-        "manual-loop" => ackermann::manual_loop,
-        "systematic-loop" => ackermann::systematic::systematic_loop,
-        "systematic-tco-loop" => ackermann::systematic_tco::systematic_loop,
+        "loop" => ackermann::r#loop,
+        "yield" => ackermann::r#yield,
+        "yield-tco" => ackermann::yield_tco,
+        "manual" => ackermann::manual,
+        "manual-tco" => ackermann::manual_tco,
         _ => panic!("Impossible value for IMPL."),
     };
     let m = value_t!(matches.value_of("M"), u64).unwrap_or_else(|e| e.exit());
