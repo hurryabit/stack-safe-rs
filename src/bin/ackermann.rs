@@ -4,7 +4,7 @@
 // A(3, 13) =  65533,   2.8 sec, manual-loop
 // A(3, 13) =  65533,   4.3 sec, recursive
 // A(3, 13) =  65533,   4.0 sec, systematic-tco-loop
-// A(3, 13) =  65533,   5.7 sec, systematic-loop
+// A(3, 13) =  65533,   6.0 sec, systematic-loop
 // A(3, 13) =  65533,  18.7 sec, stack-safe
 // A(3, 14) = 131069,  20.9 sec, recursive
 // A(3, 14) = 131069,  99.3 sec, stack-safe
@@ -57,6 +57,9 @@ mod ackermann {
     }
 
     pub mod systematic {
+        use std::ops::{Generator, GeneratorState};
+        use std::pin::Pin;
+
         enum Kont {
             A { m: u64, n: u64 },
             B,
@@ -64,54 +67,41 @@ mod ackermann {
             D,
         }
 
-        enum Outcome {
-            Yield(u64, u64, Kont),
-            Return(u64),
-        }
-
         impl Kont {
             pub fn init(m: u64, n: u64) -> Self {
                 Self::A { m, n }
             }
+        }
 
-            pub fn resume(self, r: u64) -> Outcome {
-                match self {
+        impl Generator<u64> for Kont {
+            type Yield = (u64, u64);
+            type Return = u64;
+
+            fn resume(self: Pin<&mut Self>, r: u64) -> GeneratorState<Self::Yield, Self::Return> {
+                match *self {
                     Self::A { m, n } => {
                         if m == 0 {
-                            Outcome::Return(n + 1)
+                            GeneratorState::Complete(n + 1)
                         } else if n == 0 {
-                            Outcome::Yield(m - 1, 1, Self::B)
+                            *self.get_mut() = Self::B;
+                            GeneratorState::Yielded((m - 1, 1))
                         } else {
-                            Outcome::Yield(m, n - 1, Self::C { m })
+                            *self.get_mut() = Self::C { m };
+                            GeneratorState::Yielded((m, n - 1))
                         }
                     }
-                    Self::B => Outcome::Return(r),
-                    Self::C { m } => Outcome::Yield(m - 1, r, Self::D),
-                    Self::D => Outcome::Return(r),
+                    Self::B => GeneratorState::Complete(r),
+                    Self::C { m } => {
+                        *self.get_mut() = Self::D;
+                        GeneratorState::Yielded((m - 1, r))
+                    }
+                    Self::D => GeneratorState::Complete(r),
                 }
             }
         }
 
         pub fn systematic_loop(m: u64, n: u64) -> u64 {
-            let mut stack = Vec::new();
-            let mut kont = Kont::init(m, n);
-            let mut res = 0;
-            loop {
-                match kont.resume(res) {
-                    Outcome::Yield(m, n, push_kont) => {
-                        stack.push(push_kont);
-                        kont = Kont::init(m, n);
-                        res = 0;
-                    }
-                    Outcome::Return(r) => match stack.pop() {
-                        None => return r,
-                        Some(pop_kont) => {
-                            kont = pop_kont;
-                            res = r;
-                        }
-                    },
-                }
-            }
+            stack_safe::recurse(|(m, n)| Kont::init(m, n))((m, n))
         }
     }
 
