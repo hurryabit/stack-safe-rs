@@ -3,9 +3,9 @@
 // A(3, 12) =  32765,   6.3 sec, stack-safe
 // A(3, 13) =  65533,   2.8 sec, manual-loop
 // A(3, 13) =  65533,   4.3 sec, recursive
-// A(3, 13) =  65533,   6.1 sec, systematic-tco-loop
-// A(3, 13) =  65533,   8.2 sec, systematic-loop
-// A(3, 13) =  65533,  21.7 sec, stack-safe
+// A(3, 13) =  65533,   4.0 sec, systematic-tco-loop
+// A(3, 13) =  65533,   5.7 sec, systematic-loop
+// A(3, 13) =  65533,  18.7 sec, stack-safe
 // A(3, 14) = 131069,  20.9 sec, recursive
 // A(3, 14) = 131069,  99.3 sec, stack-safe
 // ---- this is the ceiling for the recursive version
@@ -93,21 +93,25 @@ mod ackermann {
         }
 
         pub fn systematic_loop(m: u64, n: u64) -> u64 {
-            let mut stack = vec![Kont::init(m, n)];
+            let mut stack = Vec::new();
+            let mut kont = Kont::init(m, n);
             let mut res = 0;
-            while let Some(kont) = stack.pop() {
+            loop {
                 match kont.resume(res) {
-                    Outcome::Yield(m, n, kont) => {
-                        stack.push(kont);
-                        stack.push(Kont::init(m, n));
+                    Outcome::Yield(m, n, push_kont) => {
+                        stack.push(push_kont);
+                        kont = Kont::init(m, n);
                         res = 0;
                     }
-                    Outcome::Return(r) => {
-                        res = r;
-                    }
+                    Outcome::Return(r) => match stack.pop() {
+                        None => return r,
+                        Some(pop_kont) => {
+                            kont = pop_kont;
+                            res = r;
+                        }
+                    },
                 }
             }
-            res
         }
     }
 
@@ -145,25 +149,29 @@ mod ackermann {
         }
 
         pub fn systematic_loop(m: u64, n: u64) -> u64 {
-            let mut stack = vec![Kont::init(m, n)];
+            let mut stack = Vec::new();
+            let mut kont = Kont::init(m, n);
             let mut res = 0;
-            while let Some(kont) = stack.pop() {
+            loop {
                 match kont.resume(res) {
-                    Outcome::Yield(m, n, kont) => {
-                        stack.push(kont);
-                        stack.push(Kont::init(m, n));
+                    Outcome::Yield(m, n, push_kont) => {
+                        stack.push(push_kont);
+                        kont = Kont::init(m, n);
                         res = 0;
                     }
                     Outcome::TailCall(m, n) => {
-                        stack.push(Kont::init(m, n));
+                        kont = Kont::init(m, n);
                         res = 0;
                     }
-                    Outcome::Return(r) => {
-                        res = r;
-                    }
+                    Outcome::Return(r) => match stack.pop() {
+                        None => return r,
+                        Some(pop_kont) => {
+                            kont = pop_kont;
+                            res = r;
+                        }
+                    },
                 }
             }
-            res
         }
     }
 }

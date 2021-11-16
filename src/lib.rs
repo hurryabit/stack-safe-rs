@@ -10,23 +10,26 @@ where
     Gen: Generator<Res, Yield = Arg, Return = Res> + Unpin,
 {
     move |arg: Arg| {
-        let mut stack = vec![f(arg)];
+        let mut stack = Vec::new();
+        let mut gen = f(arg);
         let mut res = Res::default();
 
-        while let Some(mut gen) = stack.pop() {
+        loop {
             match Pin::new(&mut gen).resume(res) {
                 GeneratorState::Yielded(arg) => {
                     stack.push(gen);
-                    stack.push(f(arg));
+                    gen = f(arg);
                     res = Res::default();
                 }
-                GeneratorState::Complete(res1) => {
-                    res = res1;
-                }
+                GeneratorState::Complete(res1) => match stack.pop() {
+                    None => return res1,
+                    Some(top) => {
+                        gen = top;
+                        res = res1;
+                    }
+                },
             }
         }
-
-        res
     }
 }
 
@@ -37,26 +40,31 @@ where
     Gen: Generator<(Res, St), Yield = (Arg, St), Return = (Res, St)> + Unpin,
 {
     move |arg: Arg, st: &mut St| {
-        let mut stack = vec![f(arg)];
+        let mut stack = Vec::new();
+        let mut gen = f(arg);
         let mut res = Res::default();
         let mut st_def = St::default();
 
-        while let Some(mut gen) = stack.pop() {
+        loop {
             match Pin::new(&mut gen).resume((res, mem::replace(st, st_def))) {
                 GeneratorState::Yielded((arg, st1)) => {
                     st_def = mem::replace(st, st1);
                     stack.push(gen);
-                    stack.push(f(arg));
+                    gen = f(arg);
                     res = Res::default();
                 }
                 GeneratorState::Complete((res1, st1)) => {
-                    res = res1;
                     st_def = mem::replace(st, st1);
+                    match stack.pop() {
+                        None => return res1,
+                        Some(top) => {
+                            gen = top;
+                            res = res1;
+                        }
+                    }
                 }
             }
         }
-
-        res
     }
 }
 

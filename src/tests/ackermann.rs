@@ -35,5 +35,5 @@ fn recursive_is_unsafe() {
 
 #[test]
 fn stack_safe_is_safe() {
-    assert_eq!(stack_safe(3, 12), 32765);
+    assert_eq!(stack_safe(3, 10), 8189);
 }
