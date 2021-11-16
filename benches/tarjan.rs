@@ -84,7 +84,7 @@ mod tarjan {
     }
 
     pub fn stack_safe(graph: &Graph) -> SCCs {
-        use stack_safe::recurse_st;
+        use stack_safe::recurse_mut;
         use std::cmp::min;
 
         let n = graph.len();
@@ -100,7 +100,7 @@ mod tarjan {
         s.lowlinks.resize(n, usize::MAX);
 
         fn dfs(v: Node, graph: &Graph, s: &mut State) {
-            recurse_st(|(v, graph): (Node, &Graph)| {
+            recurse_mut(|(v, graph): (Node, &Graph)| {
                 move |(_, mut s): ((), State)| {
                     s.indices[v.id] = s.index;
                     s.lowlinks[v.id] = s.index;

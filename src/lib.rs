@@ -82,33 +82,35 @@ where
     }
 }
 
-pub fn recurse_st<Arg, Res, St, Gen>(f: impl Fn(Arg) -> Gen) -> impl Fn(Arg, &mut St) -> Res
+pub fn recurse_mut<Arg, MutArg, Res, Gen>(
+    f: impl Fn(Arg) -> Gen,
+) -> impl Fn(Arg, &mut MutArg) -> Res
 where
     Res: Default,
-    St: Default,
-    Gen: Generator<(Res, St), Yield = (Arg, St), Return = (Res, St)> + Unpin,
+    MutArg: Default,
+    Gen: Generator<(Res, MutArg), Yield = (Arg, MutArg), Return = (Res, MutArg)> + Unpin,
 {
-    move |arg: Arg, st: &mut St| {
+    move |arg: Arg, mut_arg: &mut MutArg| {
         let mut stack = Vec::new();
         let mut gen = f(arg);
         let mut res = Res::default();
-        let mut st_def = St::default();
+        let mut mut_def = MutArg::default();
 
         loop {
-            match Pin::new(&mut gen).resume((res, mem::replace(st, st_def))) {
-                GeneratorState::Yielded((arg, st1)) => {
-                    st_def = mem::replace(st, st1);
+            match Pin::new(&mut gen).resume((res, mem::replace(mut_arg, mut_def))) {
+                GeneratorState::Yielded((arg, new_mut_arg)) => {
+                    mut_def = mem::replace(mut_arg, new_mut_arg);
                     stack.push(gen);
                     gen = f(arg);
                     res = Res::default();
                 }
-                GeneratorState::Complete((res1, st1)) => {
-                    st_def = mem::replace(st, st1);
+                GeneratorState::Complete((new_res, new_mut_arg)) => {
+                    mut_def = mem::replace(mut_arg, new_mut_arg);
                     match stack.pop() {
-                        None => return res1,
-                        Some(top) => {
-                            gen = top;
-                            res = res1;
+                        None => return new_res,
+                        Some(new_gen) => {
+                            gen = new_gen;
+                            res = new_res;
                         }
                     }
                 }
