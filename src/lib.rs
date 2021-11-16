@@ -10,21 +10,21 @@ where
 {
     move |arg: Arg| {
         let mut stack = Vec::new();
-        let mut gen = f(arg);
+        let mut current = f(arg);
         let mut res = Res::default();
 
         loop {
-            match Pin::new(&mut gen).resume(res) {
+            match Pin::new(&mut current).resume(res) {
                 GeneratorState::Yielded(arg) => {
-                    stack.push(gen);
-                    gen = f(arg);
+                    stack.push(current);
+                    current = f(arg);
                     res = Res::default();
                 }
-                GeneratorState::Complete(res1) => match stack.pop() {
-                    None => return res1,
+                GeneratorState::Complete(real_res) => match stack.pop() {
+                    None => return real_res,
                     Some(top) => {
-                        gen = top;
-                        res = res1;
+                        current = top;
+                        res = real_res;
                     }
                 },
             }
