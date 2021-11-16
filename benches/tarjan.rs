@@ -99,9 +99,10 @@ mod tarjan {
         s.indices.resize(n, usize::MAX);
         s.lowlinks.resize(n, usize::MAX);
 
-        fn dfs(v: Node, graph: &Graph, s: &mut State) {
+        #[allow(clippy::needless_lifetimes)]
+        fn dfs<'a>(v: Node, graph: &Graph, s: &'a mut State) {
             recurse_mut(|(v, graph): (Node, &Graph)| {
-                move |(_, mut s): ((), State)| {
+                move |(_, mut s): ((), &'a mut State)| {
                     s.indices[v.id] = s.index;
                     s.lowlinks[v.id] = s.index;
                     s.index += 1;

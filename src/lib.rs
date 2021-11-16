@@ -1,5 +1,4 @@
 #![feature(destructuring_assignment, generators, generator_trait, step_trait)]
-use std::mem;
 use std::ops::{Generator, GeneratorState};
 use std::pin::Pin;
 use std::thread;
@@ -82,30 +81,33 @@ where
     }
 }
 
-pub fn recurse_mut<Arg, MutArg, Res, Gen>(
+pub fn recurse_mut<'a, Arg, MutArg, Res, Gen>(
     f: impl Fn(Arg) -> Gen,
-) -> impl Fn(Arg, &mut MutArg) -> Res
+) -> impl Fn(Arg, &'a mut MutArg) -> Res
 where
+    MutArg: 'a,
     Res: Default,
-    MutArg: Default,
-    Gen: Generator<(Res, MutArg), Yield = (Arg, MutArg), Return = (Res, MutArg)> + Unpin,
+    Gen: Generator<
+            (Res, &'a mut MutArg),
+            Yield = (Arg, &'a mut MutArg),
+            Return = (Res, &'a mut MutArg),
+        > + Unpin,
 {
-    move |arg: Arg, mut_arg: &mut MutArg| {
+    move |arg: Arg, mut mut_arg: &mut MutArg| {
         let mut stack = Vec::new();
         let mut gen = f(arg);
         let mut res = Res::default();
-        let mut mut_def = MutArg::default();
 
         loop {
-            match Pin::new(&mut gen).resume((res, mem::replace(mut_arg, mut_def))) {
+            match Pin::new(&mut gen).resume((res, mut_arg)) {
                 GeneratorState::Yielded((arg, new_mut_arg)) => {
-                    mut_def = mem::replace(mut_arg, new_mut_arg);
+                    mut_arg = new_mut_arg;
                     stack.push(gen);
                     gen = f(arg);
                     res = Res::default();
                 }
                 GeneratorState::Complete((new_res, new_mut_arg)) => {
-                    mut_def = mem::replace(mut_arg, new_mut_arg);
+                    mut_arg = new_mut_arg;
                     match stack.pop() {
                         None => return new_res,
                         Some(new_gen) => {
