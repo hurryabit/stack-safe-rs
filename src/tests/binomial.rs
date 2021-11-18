@@ -1,6 +1,4 @@
-use crate as stack_safe;
-
-pub fn binomial_stack_safe(n: u64, k: u64) -> u64 {
+fn binomial_stack_safe(n: u64, k: u64) -> u64 {
     stack_safe::recurse(|(n, k)| move |_| {
         if k == 0 || k == n {
             1
@@ -9,6 +7,9 @@ pub fn binomial_stack_safe(n: u64, k: u64) -> u64 {
         }
     })((n, k))
 }
+
+
+
 
 #[test]
 fn binomial_10_3() {
