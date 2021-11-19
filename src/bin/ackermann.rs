@@ -83,6 +83,7 @@ mod ackermann {
             B,
             C { m: u64 },
             D,
+            E,
         }
 
         impl Kont {
@@ -113,7 +114,11 @@ mod ackermann {
                         *self.get_mut() = Self::D;
                         GeneratorState::Yielded((m - 1, r))
                     }
-                    Self::D => GeneratorState::Complete(r),
+                    Self::D => {
+                        *self.get_mut() = Self::E;
+                        GeneratorState::Complete(r)
+                    }
+                    Self::E => panic!("Trying to resume finished generator."),
                 }
             }
         }
@@ -131,6 +136,7 @@ mod ackermann {
         pub enum Kont {
             A { m: u64, n: u64 },
             C { m: u64 },
+            E,
         }
 
         impl Kont {
@@ -155,7 +161,11 @@ mod ackermann {
                             GeneratorState::Yielded(Call::normal((m, n - 1)))
                         }
                     }
-                    Self::C { m } => GeneratorState::Yielded(Call::tail((m - 1, r))),
+                    Self::C { m } => {
+                        *self.get_mut() = Self::E;
+                        GeneratorState::Yielded(Call::tail((m - 1, r)))
+                    }
+                    Self::E => panic!("Trying to resume finished generator."),
                 }
             }
         }
