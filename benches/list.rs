@@ -37,7 +37,7 @@ mod list {
         }
 
         pub fn len_stack_safe(&self) -> usize {
-            stack_safe::recurse(|list: &List<T>| {
+            stack_safe::trampoline(|list: &List<T>| {
                 move |_: usize| match list {
                     Self::Nil => 0,
                     Self::Cons { head: _, tail } => {

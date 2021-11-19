@@ -15,7 +15,7 @@
 #![feature(generators, generator_trait)]
 
 mod ackermann {
-    use stack_safe::{recurse, recurse_tco, Call};
+    use stack_safe::{trampoline, trampoline_tco, Call};
 
     pub fn recursive(m: u64, n: u64) -> u64 {
         if m == 0 {
@@ -45,7 +45,7 @@ mod ackermann {
     }
 
     pub fn r#yield(m: u64, n: u64) -> u64 {
-        recurse(|(m, n): (u64, u64)| {
+        trampoline(|(m, n): (u64, u64)| {
             move |_: u64| {
                 if m == 0 {
                     n + 1
@@ -60,7 +60,7 @@ mod ackermann {
     }
 
     pub fn yield_tco(m: u64, n: u64) -> u64 {
-        recurse_tco(|(m, n): (u64, u64)| {
+        trampoline_tco(|(m, n): (u64, u64)| {
             move |_: u64| {
                 if m == 0 {
                     n + 1
@@ -120,7 +120,7 @@ mod ackermann {
     }
 
     pub fn manual(m: u64, n: u64) -> u64 {
-        recurse(|(m, n)| manual::Kont::init(m, n))((m, n))
+        trampoline(|(m, n)| manual::Kont::init(m, n))((m, n))
     }
 
     pub mod manual_tco {
@@ -162,7 +162,7 @@ mod ackermann {
     }
 
     pub fn manual_tco(m: u64, n: u64) -> u64 {
-        recurse_tco(|(m, n)| manual_tco::Kont::init(m, n))((m, n))
+        trampoline_tco(|(m, n)| manual_tco::Kont::init(m, n))((m, n))
     }
 }
 

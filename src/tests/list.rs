@@ -1,6 +1,6 @@
 use std::ops::Range;
 
-use crate::{recurse, with_stack_size};
+use crate::{trampoline, with_stack_size};
 
 enum List<T> {
     Nil,
@@ -34,7 +34,7 @@ impl<T> List<T> {
     }
 
     fn len_stack_safe(&self) -> usize {
-        recurse(|list: &List<T>| {
+        trampoline(|list: &List<T>| {
             move |_: usize| match list {
                 Self::Nil => 0,
                 Self::Cons { head: _, tail } => {

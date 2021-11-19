@@ -41,7 +41,7 @@ mod tree {
         }
 
         pub fn depth_stack_safe(&self) -> usize {
-            stack_safe::recurse(|tree: &Tree| {
+            stack_safe::trampoline(|tree: &Tree| {
                 move |_: usize| {
                     let mut max_child_depth = 0;
                     for child in &tree.children {

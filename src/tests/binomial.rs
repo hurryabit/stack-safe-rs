@@ -1,7 +1,7 @@
-use crate::recurse;
+use crate::trampoline;
 
 fn binomial_stack_safe(n: u64, k: u64) -> u64 {
-    recurse(|(n, k)| move |_| {
+    trampoline(|(n, k)| move |_| {
         if k == 0 || k == n {
             1
         } else {

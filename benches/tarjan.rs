@@ -84,7 +84,7 @@ mod tarjan {
     }
 
     pub fn stack_safe(graph: &Graph) -> SCCs {
-        use stack_safe::recurse_mut;
+        use stack_safe::trampoline_mut;
         use std::cmp::min;
 
         let n = graph.len();
@@ -101,7 +101,7 @@ mod tarjan {
 
         #[allow(clippy::needless_lifetimes)]
         fn dfs<'a>(v: Node, graph: &Graph, s: &'a mut State) {
-            recurse_mut(|(v, graph): (Node, &Graph)| {
+            trampoline_mut(|(v, graph): (Node, &Graph)| {
                 move |(_, mut s): ((), &'a mut State)| {
                     s.indices[v.id] = s.index;
                     s.lowlinks[v.id] = s.index;

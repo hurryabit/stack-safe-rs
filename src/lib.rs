@@ -3,7 +3,7 @@ use std::ops::{Generator, GeneratorState};
 use std::pin::Pin;
 use std::thread;
 
-pub fn recurse<Arg, Res, Gen>(f: impl Fn(Arg) -> Gen) -> impl Fn(Arg) -> Res
+pub fn trampoline<Arg, Res, Gen>(f: impl Fn(Arg) -> Gen) -> impl Fn(Arg) -> Res
 where
     Res: Default,
     Gen: Generator<Res, Yield = Arg, Return = Res> + Unpin,
@@ -50,7 +50,7 @@ impl<T> Call<T> {
     }
 }
 
-pub fn recurse_tco<Arg, Res, Gen>(f: impl Fn(Arg) -> Gen) -> impl Fn(Arg) -> Res
+pub fn trampoline_tco<Arg, Res, Gen>(f: impl Fn(Arg) -> Gen) -> impl Fn(Arg) -> Res
 where
     Res: Default,
     Gen: Generator<Res, Yield = Call<Arg>, Return = Res> + Unpin,
@@ -81,7 +81,7 @@ where
     }
 }
 
-pub fn recurse_mut<'a, Arg, MutArg, Res, Gen>(
+pub fn trampoline_mut<'a, Arg, MutArg, Res, Gen>(
     f: impl Fn(Arg) -> Gen,
 ) -> impl Fn(Arg, &'a mut MutArg) -> Res
 where

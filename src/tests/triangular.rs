@@ -1,4 +1,4 @@
-use crate::{recurse, with_stack_size};
+use crate::{trampoline, with_stack_size};
 
 fn recursive(n: u64) -> u64 {
     if n == 0 {
@@ -9,7 +9,7 @@ fn recursive(n: u64) -> u64 {
 }
 
 fn stack_safe(n: u64) -> u64 {
-    recurse(|n: u64| {
+    trampoline(|n: u64| {
         move |_: u64| {
             if n == 0 {
                 0
