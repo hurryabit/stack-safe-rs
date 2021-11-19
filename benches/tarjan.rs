@@ -143,6 +143,138 @@ mod tarjan {
         s.components
     }
 
+    pub mod manual {
+        use super::{Graph, Node, SCCs, State};
+        use std::cmp::min;
+        use std::collections::HashSet;
+        use std::ops::{Generator, GeneratorState};
+
+        enum DfsGen<'a> {
+            Init {
+                v: Node,
+                graph: &'a Graph,
+            },
+            Call {
+                v: Node,
+                graph: &'a Graph,
+                ws: std::slice::Iter<'a, Node>,
+                w: Node,
+            },
+            Done,
+        }
+
+        impl<'a> DfsGen<'a> {
+            pub fn init((v, graph): (Node, &'a Graph)) -> Self {
+                Self::Init { v, graph }
+            }
+        }
+
+        impl<'a> Generator<((), &'a mut State)> for DfsGen<'a> {
+            type Yield = ((Node, &'a Graph), &'a mut State);
+            type Return = ((), &'a mut State);
+
+            fn resume(
+                self: std::pin::Pin<&mut Self>,
+                ((), s): ((), &'a mut State),
+            ) -> GeneratorState<Self::Yield, Self::Return> {
+                let this = self.get_mut();
+                match std::mem::replace(this, Self::Done) {
+                    Self::Init { v, graph } => {
+                        s.indices[v.id] = s.index;
+                        s.lowlinks[v.id] = s.index;
+                        s.index += 1;
+                        s.stack.push(v);
+                        s.on_stack.insert(v);
+
+                        let mut ws = graph[v.id].iter();
+                        #[allow(clippy::while_let_on_iterator)]
+                        while let Some(&w) = ws.next() {
+                            if s.indices[w.id] == usize::MAX {
+                                *this = Self::Call { v, graph, ws, w };
+                                return GeneratorState::Yielded(((w, graph), s));
+                            } else if s.on_stack.contains(&w) {
+                                s.lowlinks[v.id] = min(s.lowlinks[v.id], s.indices[w.id]);
+                            }
+                        }
+
+                        if s.lowlinks[v.id] == s.indices[v.id] {
+                            let mut component = Vec::new();
+                            let mut w = Node { id: usize::MAX };
+                            while w != v {
+                                w = s.stack.pop().unwrap();
+                                s.on_stack.remove(&w);
+                                component.push(w)
+                            }
+                            s.components.push(component);
+                        }
+                        *this = Self::Done;
+                        GeneratorState::Complete(((), s))
+                    }
+                    Self::Call {
+                        v,
+                        graph,
+                        mut ws,
+                        w,
+                    } => {
+                        s.lowlinks[v.id] = min(s.lowlinks[v.id], s.lowlinks[w.id]);
+
+                        while let Some(&w) = ws.next() {
+                            if s.indices[w.id] == usize::MAX {
+                                *this = Self::Call { v, graph, ws, w };
+                                return GeneratorState::Yielded(((w, graph), s));
+                            } else if s.on_stack.contains(&w) {
+                                s.lowlinks[v.id] = min(s.lowlinks[v.id], s.indices[w.id]);
+                            }
+                        }
+
+                        if s.lowlinks[v.id] == s.indices[v.id] {
+                            let mut component = Vec::new();
+                            let mut w = Node { id: usize::MAX };
+                            while w != v {
+                                w = s.stack.pop().unwrap();
+                                s.on_stack.remove(&w);
+                                component.push(w)
+                            }
+                            s.components.push(component);
+                        }
+                        *this = Self::Done;
+                        GeneratorState::Complete(((), s))
+                    }
+                    Self::Done => panic!("Trying to resume finished DfsGen."),
+                }
+            }
+        }
+
+        pub fn stack_safe(graph: &Graph) -> SCCs {
+            use stack_safe::trampoline_mut;
+
+            let n = graph.len();
+            let mut s = State {
+                index: 0,
+                indices: Vec::with_capacity(n),
+                lowlinks: Vec::with_capacity(n),
+                components: Vec::new(),
+                stack: Vec::new(),
+                on_stack: HashSet::new(),
+            };
+            s.indices.resize(n, usize::MAX);
+            s.lowlinks.resize(n, usize::MAX);
+
+            fn dfs(v: Node, graph: &Graph, s: &mut State) {
+                trampoline_mut(DfsGen::init)((v, graph), s)
+            }
+
+            for id in 0..n {
+                let v = Node { id };
+                if s.indices[v.id] == usize::MAX {
+                    dfs(v, graph, &mut s);
+                }
+            }
+
+            s.components
+        }
+    }
+
     pub mod examples {
         #![allow(non_upper_case_globals)]
         use super::*;
@@ -173,7 +305,7 @@ mod tarjan {
 
         pub fn path_rev(n: usize) -> Graph {
             let mut graph = vec![vec![]];
-            graph.extend((0..(n-1)).map(|id| vec![Node::new(id)]));
+            graph.extend((0..(n - 1)).map(|id| vec![Node::new(id)]));
             graph
         }
 
@@ -201,7 +333,12 @@ pub fn bench_tarjan(c: &mut Criterion) {
     #[allow(clippy::type_complexity)]
     let cases: [(&str, fn(usize) -> Graph, fn(usize) -> SCCs, usize); 3] = [
         ("P_{size}", examples::path, examples::path_sccs, 10_000),
-        ("P_{size}_rev", examples::path_rev, examples::path_rev_sccs, 10_000),
+        (
+            "P_{size}_rev",
+            examples::path_rev,
+            examples::path_rev_sccs,
+            10_000,
+        ),
         ("K_{size}", examples::complete, examples::complete_sccs, 500),
     ];
 
@@ -215,6 +352,12 @@ pub fn bench_tarjan(c: &mut Criterion) {
         let graph_clone = graph.clone();
         assert_eq!(
             stack_safe::with_stack_size(10 * 1024, move || stack_safe(&graph_clone)).unwrap(),
+            sccs,
+        );
+        let graph_clone = graph.clone();
+        assert_eq!(
+            stack_safe::with_stack_size(10 * 1024, move || manual::stack_safe(&graph_clone))
+                .unwrap(),
             sccs,
         );
 
@@ -232,6 +375,11 @@ pub fn bench_tarjan(c: &mut Criterion) {
                 })
             },
         );
+        group.bench_with_input(BenchmarkId::new("manual", &label), &graph, |b, graph| {
+            b.iter(|| {
+                manual::stack_safe(graph);
+            })
+        });
     }
     group.finish();
 }

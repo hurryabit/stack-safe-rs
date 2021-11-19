@@ -1,6 +1,9 @@
 {
     "cSpell.words": [
         "Ackermann",
-        "Kont"
+        "Kont",
+        "lowlinks",
+        "sccs",
+        "tarjan"
     ]
 }
