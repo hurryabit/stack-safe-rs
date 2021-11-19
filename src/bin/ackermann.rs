@@ -4,7 +4,7 @@
 +─────────────+─────────+───────+────────────+─────────────+─────────+────────────+────────+
 |             | result  | loop  | recursive  | manual-tco  | manual  | yield-tco  | yield  |
 +─────────────+─────────+───────+────────────+─────────────+─────────+────────────+────────+
-| "A(3, 12)"  | 32765   |       | 1.3        |             |         |            | 6.3    |
+| "A(3, 12)"  | 32765   |       | 1.1        |             |         | 1.3        | 4.6    |
 | "A(3, 13)"  | 65533   | 2.8   | 4.3        | 4.4         | 6.0     | 5.3        | 18.7   |
 | "A(3, 14)"  | 131069  |       | 20.9       |             |         |            | 99.3   |
 | "A(3, 15)"  | 262141  |       | SO         |             |         |            | 403    |
@@ -13,8 +13,43 @@
  */
 
 #![feature(generators, generator_trait)]
+use genawaiter::{Coroutine, GeneratorState};
+use std::pin::Pin;
+
+pub fn trampoline_ga<Arg, Res, Gen>(f: impl Fn(Arg) -> Gen) -> impl Fn(Arg) -> Res
+where
+    Res: Default,
+    Gen: Coroutine<Yield = Arg, Resume = Res, Return = Res> + Unpin,
+{
+    move |arg: Arg| {
+        let mut stack = Vec::new();
+        let mut current = f(arg);
+        let mut res = Res::default();
+
+        loop {
+            match Pin::new(&mut current).resume_with(res) {
+                GeneratorState::Yielded(arg) => {
+                    stack.push(current);
+                    current = f(arg);
+                    res = Res::default();
+                }
+                GeneratorState::Complete(real_res) => match stack.pop() {
+                    None => return real_res,
+                    Some(top) => {
+                        current = top;
+                        res = real_res;
+                    }
+                },
+            }
+        }
+    }
+}
 
 mod ackermann {
+    use std::future::Future;
+
+    use genawaiter::yield_;
+    use genawaiter::rc::{Gen, gen};
     use stack_safe::{trampoline, trampoline_tco, Call};
 
     pub fn recursive(m: u64, n: u64) -> u64 {
@@ -72,6 +107,23 @@ mod ackermann {
                 }
             }
         })((m, n))
+    }
+
+    pub fn genawaiter(m: u64, n: u64) -> u64 {
+        fn gen_func((m, n): (u64, u64)) -> Gen<(u64, u64), u64, impl Future<Output = u64>> {
+            gen!({
+                if m == 0 {
+                    n + 1
+                } else if n == 0 {
+                    yield_!((m - 1, 1))
+                } else {
+                    let k = yield_!((m, n - 1));
+                    yield_!((m - 1, k))
+                }
+            })
+        }
+
+        super::trampoline_ga(gen_func)((m, n))
     }
 
     pub mod manual {
@@ -188,6 +240,7 @@ fn main() {
                     "loop",
                     "yield",
                     "yield-tco",
+                    "genawaiter",
                     "manual",
                     "manual-tco",
                 ]),
@@ -211,6 +264,7 @@ fn main() {
         "loop" => ackermann::r#loop,
         "yield" => ackermann::r#yield,
         "yield-tco" => ackermann::yield_tco,
+        "genawaiter" => ackermann::genawaiter,
         "manual" => ackermann::manual,
         "manual-tco" => ackermann::manual_tco,
         _ => panic!("Impossible value for IMPL."),
