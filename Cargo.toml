@@ -10,6 +10,7 @@ repository = "https://github.com/hurryabit/stack-safe.git"
 license = "Apache 2.0"
 
 [dependencies]
+static_assertions = "1.1.0"
 clap = "~2.33.3"
 
 [dev-dependencies]

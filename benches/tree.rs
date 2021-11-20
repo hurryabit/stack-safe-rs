@@ -52,6 +52,76 @@ mod tree {
                 }
             })(self)
         }
+
+        pub fn depth_manual(&self) -> usize {
+            stack_safe::trampoline(manual::DepthGen::init)(self)
+        }
+    }
+
+    mod manual {
+        use super::*;
+        use std::ops::{Generator, GeneratorState};
+
+        pub enum DepthGen<'a> {
+            Init {
+                tree: &'a Tree,
+            },
+            Call {
+                max_child_depth: usize,
+                children: std::slice::Iter<'a, Tree>,
+            },
+            Done,
+        }
+
+        static_assertions::const_assert_eq!(std::mem::size_of::<DepthGen>(), 32);
+
+        impl<'a> DepthGen<'a> {
+            pub fn init(tree: &'a Tree) -> Self {
+                Self::Init { tree }
+            }
+        }
+
+        impl<'a> Generator<usize> for DepthGen<'a> {
+            type Yield = &'a Tree;
+            type Return = usize;
+
+            fn resume(
+                self: std::pin::Pin<&mut Self>,
+                child_depth: usize,
+            ) -> GeneratorState<Self::Yield, Self::Return> {
+                let this = self.get_mut();
+                match this {
+                    Self::Init { tree } => {
+                        let max_child_depth = 0;
+                        let mut children = tree.children.iter();
+                        if let Some(child) = children.next() {
+                            *this = Self::Call {
+                                max_child_depth,
+                                children,
+                            };
+                            GeneratorState::Yielded(child)
+                        } else {
+                            *this = Self::Done;
+                            GeneratorState::Complete(max_child_depth + 1)
+                        }
+                    }
+                    Self::Call {
+                        max_child_depth,
+                        children,
+                    } => {
+                        *max_child_depth = max(*max_child_depth, child_depth);
+                        if let Some(child) = children.next() {
+                            GeneratorState::Yielded(child)
+                        } else {
+                            let depth = *max_child_depth + 1;
+                            *this = Self::Done;
+                            GeneratorState::Complete(depth)
+                        }
+                    }
+                    Self::Done => panic!("Trying to resume completed DepthGen"),
+                }
+            }
+        }
     }
 
     pub mod examples {
@@ -112,6 +182,10 @@ pub fn bench_tree_depth(c: &mut Criterion) {
             stack_safe::with_stack_size(1024, move || tree_f(size).0.depth_stack_safe()).unwrap(),
             tree_depth,
         );
+        assert_eq!(
+            stack_safe::with_stack_size(1024, move || tree_f(size).0.depth_manual()).unwrap(),
+            tree_depth,
+        );
 
         group.bench_with_input(BenchmarkId::new("recursive", &label), &tree, |b, tree| {
             b.iter(|| {
@@ -121,6 +195,11 @@ pub fn bench_tree_depth(c: &mut Criterion) {
         group.bench_with_input(BenchmarkId::new("stack_safe", &label), &tree, |b, tree| {
             b.iter(|| {
                 assert_eq!(tree.depth_stack_safe(), tree_depth);
+            })
+        });
+        group.bench_with_input(BenchmarkId::new("manual", &label), &tree, |b, tree| {
+            b.iter(|| {
+                assert_eq!(tree.depth_manual(), tree_depth);
             })
         });
     }
