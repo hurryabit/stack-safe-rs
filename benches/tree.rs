@@ -7,14 +7,14 @@ mod tree {
 
     #[derive(Clone, Debug)]
     pub struct Tree {
-        pub id: usize,
+        pub value: i64,
         pub children: Vec<Tree>,
     }
 
     impl Tree {
-        pub fn new(id: usize) -> Self {
+        pub fn new(id: i64) -> Self {
             Self {
-                id,
+                value: id,
                 children: Vec::new(),
             }
         }
@@ -76,6 +76,7 @@ mod tree {
         static_assertions::const_assert_eq!(std::mem::size_of::<DepthGen>(), 32);
 
         impl<'a> DepthGen<'a> {
+            #[inline(always)]
             pub fn init(tree: &'a Tree) -> Self {
                 Self::Init { tree }
             }
@@ -85,6 +86,7 @@ mod tree {
             type Yield = &'a Tree;
             type Return = usize;
 
+            #[inline(always)]
             fn resume(
                 self: std::pin::Pin<&mut Self>,
                 child_depth: usize,
@@ -138,9 +140,9 @@ mod tree {
         }
 
         pub fn path(n: usize) -> (Tree, usize) {
-            let mut tree = Tree::new(n - 1);
-            for id in (0..(n - 1)).rev() {
-                let mut parent = Tree::new(id);
+            let mut tree = Tree::new(n as i64 - 1);
+            for k in (0..(n - 1)).rev() {
+                let mut parent = Tree::new(k as i64);
                 parent.children.push(tree);
                 tree = parent;
             }
