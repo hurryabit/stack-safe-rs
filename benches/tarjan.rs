@@ -100,8 +100,8 @@ mod tarjan {
         s.lowlinks.resize(n, usize::MAX);
 
         #[allow(clippy::needless_lifetimes)]
-        fn dfs<'a>(v: Node, graph: &Graph, s: &'a mut State) {
-            trampoline_mut(|(v, graph): (Node, &Graph)| {
+        fn dfs<'a>(v: Node, graph: &'a Graph, s: &'a mut State) {
+            let gen = |(v, graph): (Node, &'a Graph)| {
                 move |(_, mut s): ((), &'a mut State)| {
                     s.indices[v.id] = s.index;
                     s.lowlinks[v.id] = s.index;
@@ -130,7 +130,9 @@ mod tarjan {
                     }
                     ((), s)
                 }
-            })((v, graph), s)
+            };
+            static_assertions::assert_eq_size_val!(gen((v, graph)), [0u8; 72]);
+            trampoline_mut(gen)((v, graph), s)
         }
 
         for id in 0..n {
@@ -162,6 +164,8 @@ mod tarjan {
             },
             Done,
         }
+
+        static_assertions::assert_eq_size!(DfsGen, [u8; 48]);
 
         impl<'a> DfsGen<'a> {
             pub fn init((v, graph): (Node, &'a Graph)) -> Self {

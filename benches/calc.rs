@@ -3,8 +3,6 @@ use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion};
 use std::time::Duration;
 
 mod expr {
-    use self::manual::EvalGen;
-
     pub enum Expr {
         Num(i64),
         Add(Box<Expr>, Box<Expr>),
@@ -26,18 +24,24 @@ mod expr {
             }
         }
 
-        pub fn eval_stack_safe(&self) -> i64 {
-            stack_safe::trampoline(|e: &Self| {
+        pub fn eval_stack_safe<'a>(&'a self) -> i64 {
+            let gen = |e: &'a Self| {
                 move |_: i64| match e {
                     Self::Num(n) => *n,
                     Self::Add(e1, e2) => (yield e1.as_ref()) + (yield e2.as_ref()),
                     Self::Mul(e1, e2) => (yield e1.as_ref()) * (yield e2.as_ref()),
                 }
-            })(self)
+            };
+            static_assertions::assert_eq_size_val!(gen(self), [0u8; 40]);
+            stack_safe::trampoline(gen)(self)
         }
 
         pub fn eval_manual(&self) -> i64 {
-            stack_safe::trampoline(EvalGen::init)(self)
+            stack_safe::trampoline(manual::EvalGen::init)(self)
+        }
+
+        pub fn eval_like_generated(&self) -> i64 {
+            stack_safe::trampoline(like_generated::EvalGen::init)(self)
         }
 
         pub fn eval_loop(&self) -> i64 {
@@ -97,6 +101,7 @@ mod expr {
         }
     }
 
+    // This module contains a hand-written generator for evaluation.
     mod manual {
         use super::*;
         use std::ops::{Generator, GeneratorState};
@@ -115,6 +120,8 @@ mod expr {
                 Self::Init(expr)
             }
         }
+
+        static_assertions::assert_eq_size!(EvalGen, [u8; 16]);
 
         impl<'a> Generator<i64> for EvalGen<'a> {
             type Yield = &'a Expr;
@@ -166,6 +173,94 @@ mod expr {
         }
     }
 
+    // This module contains a generator for evaluation that resembles the one
+    // produced by the compiler from the `yield` version. In particular, it
+    // takes as much space as the produced one.
+    mod like_generated {
+        use super::*;
+        use std::ops::{Generator, GeneratorState};
+
+        pub enum EvalGenState {
+            Init,
+            Add1,
+            Add2,
+            Mul1,
+            Mul2,
+            Done,
+        }
+
+        pub struct EvalGen<'a> {
+            state: EvalGenState,
+            e0: &'a Expr,
+            e2: &'a Expr,
+            v1_add: i64,
+            v1_mul: i64,
+        }
+
+        static_assertions::assert_eq_size!(EvalGen, [u8; 40]);
+
+        impl<'a> EvalGen<'a> {
+            pub fn init(expr: &'a Expr) -> Self {
+                Self {
+                    state: EvalGenState::Init,
+                    e0: expr,
+                    e2: expr,
+                    v1_add: 0,
+                    v1_mul: 0,
+                }
+            }
+        }
+
+        impl<'a> Generator<i64> for EvalGen<'a> {
+            type Yield = &'a Expr;
+            type Return = i64;
+
+            fn resume(
+                self: std::pin::Pin<&mut Self>,
+                value: i64,
+            ) -> std::ops::GeneratorState<Self::Yield, Self::Return> {
+                let this = self.get_mut();
+                match this.state {
+                    EvalGenState::Init => match this.e0 {
+                        Expr::Num(n) => {
+                            this.state = EvalGenState::Done;
+                            GeneratorState::Complete(*n)
+                        }
+                        Expr::Add(e1, e2) => {
+                            this.e2 = e2;
+                            this.state = EvalGenState::Add1;
+                            GeneratorState::Yielded(e1)
+                        }
+                        Expr::Mul(e1, e2) => {
+                            this.e2 = e2;
+                            this.state = EvalGenState::Mul1;
+                            GeneratorState::Yielded(e1)
+                        }
+                    },
+                    EvalGenState::Add1 => {
+                        this.v1_add = value;
+                        this.state = EvalGenState::Add2;
+                        GeneratorState::Yielded(this.e2)
+                    }
+                    EvalGenState::Add2 => {
+                        this.state = EvalGenState::Done;
+                        GeneratorState::Complete(this.v1_add + value)
+                    }
+                    EvalGenState::Mul1 => {
+                        this.v1_mul = value;
+                        this.state = EvalGenState::Mul2;
+                        GeneratorState::Yielded(this.e2)
+                    }
+                    EvalGenState::Mul2 => {
+                        this.state = EvalGenState::Done;
+                        GeneratorState::Complete(this.v1_mul * value)
+                    }
+                    EvalGenState::Done => panic!("Trying to resume completed EvalGen generator."),
+                }
+            }
+        }
+    }
+
     pub mod examples {
         use super::Expr;
 
@@ -207,6 +302,7 @@ fn bench_expr_eval(c: &mut Criterion) {
             let expr = expr_f(size).0;
             assert_eq!(expr.eval_stack_safe(), expr_eval);
             assert_eq!(expr.eval_manual(), expr_eval);
+            assert_eq!(expr.eval_like_generated(), expr_eval);
             assert_eq!(expr.eval_loop(), expr_eval);
             std::mem::forget(expr);
         })
@@ -225,6 +321,11 @@ fn bench_expr_eval(c: &mut Criterion) {
         group.bench_with_input(BenchmarkId::new("manual", &label), &expr, |b, expr| {
             b.iter(|| {
                 assert_eq!(expr.eval_manual(), expr_eval);
+            })
+        });
+        group.bench_with_input(BenchmarkId::new("like_generated", &label), &expr, |b, expr| {
+            b.iter(|| {
+                assert_eq!(expr.eval_like_generated(), expr_eval);
             })
         });
         group.bench_with_input(BenchmarkId::new("loop", &label), &expr, |b, expr| {
