@@ -303,26 +303,37 @@ mod expr {
 }
 
 fn bench_expr_eval(c: &mut Criterion) {
+    #![allow(clippy::type_complexity)]
     use expr::*;
 
-    let (simple, simple_eval) = examples::simple();
-    assert_eq!(simple.eval_recursive(), simple_eval);
+    let implementations: [(&str, fn(&Expr) -> i64); 5] = [
+        ("recursive", Expr::eval_recursive),
+        ("stack_safe", Expr::eval_stack_safe),
+        ("manual", Expr::eval_manual),
+        ("like_generated", Expr::eval_like_generated),
+        ("loop", Expr::eval_loop),
+    ];
 
-    #[allow(clippy::type_complexity)]
+    let (simple, simple_eval) = examples::simple();
+    for (_, impl_func) in implementations {
+        assert_eq!(impl_func(&simple), simple_eval);
+    }
+
     let cases: [(&str, fn(usize) -> (Expr, i64), usize); 3] = [
         ("triangular_{size}", examples::triangular, 100_000),
         ("complete_tree_{size}", examples::complete_tree, 20),
         ("mixed_{size}", examples::mixed, 17),
     ];
 
+
     let mut group = c.benchmark_group("expr_eval");
-    for (label, expr_f, size) in cases {
-        let label = label.replace("{size}", &size.to_string());
-        let (expr, expr_eval) = expr_f(size);
+    for (case_name, case_func, case_size) in cases {
+        let case_name = &case_name.replace("{size}", &case_size.to_string());
+        let (expr, expr_eval) = case_func(case_size);
 
         assert_eq!(expr.eval_recursive(), expr_eval);
         stack_safe::with_stack_size(10 * 1024, move || {
-            let expr = expr_f(size).0;
+            let expr = case_func(case_size).0;
             assert_eq!(expr.eval_stack_safe(), expr_eval);
             assert_eq!(expr.eval_manual(), expr_eval);
             assert_eq!(expr.eval_like_generated(), expr_eval);
@@ -331,35 +342,13 @@ fn bench_expr_eval(c: &mut Criterion) {
         })
         .unwrap();
 
-        group.bench_with_input(BenchmarkId::new("recursive", &label), &expr, |b, expr| {
-            b.iter(|| {
-                assert_eq!(expr.eval_recursive(), expr_eval);
-            })
-        });
-        group.bench_with_input(BenchmarkId::new("stack_safe", &label), &expr, |b, expr| {
-            b.iter(|| {
-                assert_eq!(expr.eval_stack_safe(), expr_eval);
-            })
-        });
-        group.bench_with_input(BenchmarkId::new("manual", &label), &expr, |b, expr| {
-            b.iter(|| {
-                assert_eq!(expr.eval_manual(), expr_eval);
-            })
-        });
-        group.bench_with_input(
-            BenchmarkId::new("like_generated", &label),
-            &expr,
-            |b, expr| {
+        for (impl_name, impl_func) in implementations {
+            group.bench_with_input(BenchmarkId::new(impl_name, case_name), &expr, |b, expr| {
                 b.iter(|| {
-                    assert_eq!(expr.eval_like_generated(), expr_eval);
+                    assert_eq!(impl_func(expr), expr_eval);
                 })
-            },
-        );
-        group.bench_with_input(BenchmarkId::new("loop", &label), &expr, |b, expr| {
-            b.iter(|| {
-                assert_eq!(expr.eval_loop(), expr_eval);
-            })
-        });
+            });
+        }
     }
     group.finish();
 }
