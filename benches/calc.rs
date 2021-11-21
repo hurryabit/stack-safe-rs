@@ -272,12 +272,32 @@ mod expr {
             (expr, 7)
         }
 
-        pub fn triangular(n: i64) -> (Expr, i64) {
+        pub fn triangular(n: usize) -> (Expr, i64) {
+            let n = n as i64;
             let mut expr = Expr::Num(0);
             for i in 1..n {
                 expr = Expr::Add(Box::new(expr), Box::new(Expr::Num(i)));
             }
             (expr, n * (n - 1) / 2)
+        }
+
+        pub fn complete_tree(n: usize) -> (Expr, i64) {
+            complete_tree_with(n, || (Expr::Num(1), 1))
+        }
+
+        pub fn complete_tree_with(n: usize, leaf: impl Fn() -> (Expr, i64)) -> (Expr, i64) {
+            if n == 0 {
+                leaf()
+            } else {
+                let (lhs, lhs_eval) = complete_tree(n - 1);
+                let (rhs, rhs_eval) = complete_tree(n - 1);
+                (Expr::Add(Box::new(lhs), Box::new(rhs)), lhs_eval + rhs_eval)
+            }
+        }
+
+        pub fn mixed(n: usize) -> (Expr, i64) {
+            let m = 10 * 2usize.pow(n as u32);
+            complete_tree_with(n, || triangular(m))
         }
     }
 }
@@ -289,8 +309,11 @@ fn bench_expr_eval(c: &mut Criterion) {
     assert_eq!(simple.eval_recursive(), simple_eval);
 
     #[allow(clippy::type_complexity)]
-    let cases: [(&str, fn(i64) -> (Expr, i64), i64); 1] =
-        [("triangular_{size}", examples::triangular, 100_000)];
+    let cases: [(&str, fn(usize) -> (Expr, i64), usize); 3] = [
+        ("triangular_{size}", examples::triangular, 100_000),
+        ("complete_tree_{size}", examples::complete_tree, 20),
+        ("mixed_{size}", examples::mixed, 17),
+    ];
 
     let mut group = c.benchmark_group("expr_eval");
     for (label, expr_f, size) in cases {
@@ -323,11 +346,15 @@ fn bench_expr_eval(c: &mut Criterion) {
                 assert_eq!(expr.eval_manual(), expr_eval);
             })
         });
-        group.bench_with_input(BenchmarkId::new("like_generated", &label), &expr, |b, expr| {
-            b.iter(|| {
-                assert_eq!(expr.eval_like_generated(), expr_eval);
-            })
-        });
+        group.bench_with_input(
+            BenchmarkId::new("like_generated", &label),
+            &expr,
+            |b, expr| {
+                b.iter(|| {
+                    assert_eq!(expr.eval_like_generated(), expr_eval);
+                })
+            },
+        );
         group.bench_with_input(BenchmarkId::new("loop", &label), &expr, |b, expr| {
             b.iter(|| {
                 assert_eq!(expr.eval_loop(), expr_eval);
