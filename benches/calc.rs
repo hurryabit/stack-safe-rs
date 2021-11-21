@@ -329,23 +329,26 @@ fn bench_expr_eval(c: &mut Criterion) {
     let mut group = c.benchmark_group("expr_eval");
     for (case_name, case_func, case_size) in cases {
         let case_name = &case_name.replace("{size}", &case_size.to_string());
-        let (expr, expr_eval) = case_func(case_size);
+        let (expr1, expr1_eval) = case_func(case_size);
+        let (expr2, expr2_eval) = case_func((2 * (case_size + 1) - 2) / 2);
 
-        assert_eq!(expr.eval_recursive(), expr_eval);
+        assert_eq!(expr1.eval_recursive(), expr1_eval);
         stack_safe::with_stack_size(10 * 1024, move || {
             let expr = case_func(case_size).0;
-            assert_eq!(expr.eval_stack_safe(), expr_eval);
-            assert_eq!(expr.eval_manual(), expr_eval);
-            assert_eq!(expr.eval_like_generated(), expr_eval);
-            assert_eq!(expr.eval_loop(), expr_eval);
+            assert_eq!(expr.eval_stack_safe(), expr1_eval);
+            assert_eq!(expr.eval_manual(), expr1_eval);
+            assert_eq!(expr.eval_like_generated(), expr1_eval);
+            assert_eq!(expr.eval_loop(), expr1_eval);
             std::mem::forget(expr);
         })
         .unwrap();
 
+        let exprs = (expr1, expr2);
         for (impl_name, impl_func) in implementations {
-            group.bench_with_input(BenchmarkId::new(impl_name, case_name), &expr, |b, expr| {
+            group.bench_with_input(BenchmarkId::new(impl_name, case_name), &exprs, |b, (expr1, expr2)| {
                 b.iter(|| {
-                    assert_eq!(impl_func(expr), expr_eval);
+                    assert_eq!(impl_func(expr1), expr1_eval);
+                    assert_eq!(impl_func(expr2), expr2_eval);
                 })
             });
         }
