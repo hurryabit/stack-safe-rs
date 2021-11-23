@@ -5,6 +5,11 @@
         "Kont",
         "lowlinks",
         "sccs",
-        "tarjan"
+        "tarjan",
+        "uninit",
+        "Unresumed"
+    ],
+    "cSpell.ignorePaths": [
+        "*.mir"
     ]
 }
