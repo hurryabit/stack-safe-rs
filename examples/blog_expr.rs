@@ -1,48 +1,61 @@
 #![feature(generators, generator_trait)]
-#![allow(clippy::while_let_on_iterator, clippy::borrowed_box)]
+#![allow(
+    clippy::borrowed_box,
+    clippy::needless_return,
+    clippy::while_let_on_iterator
+)]
 use stack_safe::trampoline;
 use std::mem::MaybeUninit;
 use std::ops::{Generator, GeneratorState};
 use std::pin::Pin;
 
 #[derive(Debug)]
-pub enum Expr {
+pub enum Exp {
     Num(f64),
-    Add(Vec<Expr>),
-    Mul(Box<Expr>, Box<Expr>),
+    Add(Vec<Exp>),
+    Mul(Box<Exp>, Box<Exp>),
 }
 
-impl Expr {
+impl Exp {
     fn eval_recursive(&self) -> f64 {
         match self {
-            Expr::Num(num) => *num,
-            Expr::Add(exprs) => {
+            Exp::Num(val) => *val,
+            Exp::Add(exps) => {
                 let mut sum = 0.0;
-                for expr in exprs {
-                    sum += expr.eval_recursive();
-                }
-                sum
-            }
-            Expr::Mul(expr1, expr2) => expr1.eval_recursive() * expr2.eval_recursive(),
-        }
-    }
-
-    fn eval_generator(&self) -> impl Generator<f64, Yield = &Self, Return = f64> {
-        move |_: f64| match self {
-            Expr::Num(val) => *val,
-            Expr::Add(exprs) => {
-                let mut sum = 0.0;
-                let mut iter = exprs.iter();
-                while let Some(expr) = iter.next() {
-                    let val = yield expr; // Gen::Add
+                for exp in exps {
+                    let val = exp.eval_recursive();
                     sum += val;
                 }
                 sum
             }
-            Expr::Mul(expr1, expr2) => {
-                let val1 = yield expr1; // Gen::Mul1
-                let val2 = yield expr2; // Gen::Mul2
+            Exp::Mul(exp1, exp2) => {
+                let val1 = exp1.eval_recursive();
+                let val2 = exp2.eval_recursive();
                 val1 * val2
+            }
+        }
+    }
+}
+
+impl Exp {
+    fn eval_generator(&self) -> impl Generator<f64, Yield = &Self, Return = f64> {
+        move |_| match self {
+            Exp::Num(val) => {
+                return *val;
+            }
+            Exp::Add(exps) => {
+                let mut sum = 0.0;
+                let mut iter = exps.iter();
+                while let Some(exp) = iter.next() {
+                    let val = yield exp; // Gen::Add
+                    sum += val;
+                }
+                return sum;
+            }
+            Exp::Mul(exp1, exp2) => {
+                let val1 = yield exp1; // Gen::Mul1
+                let val2 = yield exp2; // Gen::Mul2
+                return val1 * val2;
             }
         }
     }
@@ -50,15 +63,15 @@ impl Expr {
 
 pub enum SimpleGen<'a> {
     Unresumed {
-        init: &'a Expr,
+        init: &'a Exp,
     },
     Returned,
     Add {
         sum: f64,
-        iter: std::slice::Iter<'a, Expr>,
+        iter: std::slice::Iter<'a, Exp>,
     },
     Mul1 {
-        expr2: &'a Box<Expr>,
+        exp2: &'a Box<Exp>,
     },
     Mul2 {
         val1: f64,
@@ -66,58 +79,58 @@ pub enum SimpleGen<'a> {
 }
 
 impl<'a> SimpleGen<'a> {
-    pub fn new(init: &'a Expr) -> Self {
+    pub fn new(init: &'a Exp) -> Self {
         SimpleGen::Unresumed { init }
     }
 }
 
 impl<'a> Generator<f64> for SimpleGen<'a> {
-    type Yield = &'a Expr;
+    type Yield = &'a Exp;
     type Return = f64;
 
     fn resume(self: Pin<&mut Self>, arg: f64) -> GeneratorState<Self::Yield, Self::Return> {
         let this = self.get_mut();
         match this {
             SimpleGen::Unresumed { init } => match init {
-                Expr::Num(val) => {
+                Exp::Num(val) => {
                     *this = SimpleGen::Returned;
                     GeneratorState::Complete(*val)
                 }
-                Expr::Add(exprs) => {
+                Exp::Add(exps) => {
                     let sum = 0.0;
-                    let mut iter = exprs.iter();
-                    if let Some(expr) = iter.next() {
+                    let mut iter = exps.iter();
+                    if let Some(exp) = iter.next() {
                         *this = SimpleGen::Add { sum, iter };
-                        GeneratorState::Yielded(expr)
+                        GeneratorState::Yielded(exp)
                     } else {
                         *this = SimpleGen::Returned;
                         GeneratorState::Complete(sum)
                     }
                 }
-                Expr::Mul(expr1, expr2) => {
-                    *this = SimpleGen::Mul1 { expr2 };
-                    GeneratorState::Yielded(expr1)
+                Exp::Mul(exp1, exp2) => {
+                    *this = SimpleGen::Mul1 { exp2 };
+                    GeneratorState::Yielded(exp1)
                 }
             },
             SimpleGen::Returned => panic!("resuming returned generator"),
             SimpleGen::Add { sum, iter } => {
                 let val = arg;
                 *sum += val;
-                if let Some(expr) = iter.next() {
+                if let Some(exp) = iter.next() {
                     // We don't need to change `this` here because we have
                     // updated `sum` and `iter` in place.
-                    GeneratorState::Yielded(expr)
+                    GeneratorState::Yielded(exp)
                 } else {
                     let sum = *sum;
                     *this = SimpleGen::Returned;
                     GeneratorState::Complete(sum)
                 }
             }
-            SimpleGen::Mul1 { expr2 } => {
+            SimpleGen::Mul1 { exp2 } => {
                 let val1 = arg;
-                let expr2 = *expr2;
+                let exp2 = *exp2;
                 *this = SimpleGen::Mul2 { val1 };
-                GeneratorState::Yielded(expr2)
+                GeneratorState::Yielded(exp2)
             }
             SimpleGen::Mul2 { val1 } => {
                 let val2 = arg;
@@ -138,33 +151,33 @@ pub enum ActualGenDiscriminator {
     Mul2,
 }
 
-union SumOrExpr2<'a> {
+union SumOrExp2<'a> {
     sum: f64,
-    expr2: &'a Box<Expr>,
+    exp2: &'a Box<Exp>,
 }
 
 pub struct ActualGen<'a> {
     discriminator: ActualGenDiscriminator,
-    init: &'a Expr,
-    sum_or_expr2: MaybeUninit<SumOrExpr2<'a>>,
+    init: &'a Exp,
+    sum_or_exp2: MaybeUninit<SumOrExp2<'a>>,
     val1: MaybeUninit<f64>,
-    iter: MaybeUninit<std::slice::Iter<'a, Expr>>,
+    iter: MaybeUninit<std::slice::Iter<'a, Exp>>,
 }
 
 impl<'a> ActualGen<'a> {
-    pub fn new(init: &'a Expr) -> Self {
+    pub fn new(init: &'a Exp) -> Self {
         ActualGen {
             discriminator: ActualGenDiscriminator::Unresumed,
             init,
             val1: MaybeUninit::uninit(),
-            sum_or_expr2: MaybeUninit::uninit(),
+            sum_or_exp2: MaybeUninit::uninit(),
             iter: MaybeUninit::uninit(),
         }
     }
 }
 
 impl<'a> Generator<f64> for ActualGen<'a> {
-    type Yield = &'a Expr;
+    type Yield = &'a Exp;
     type Return = f64;
 
     fn resume(self: Pin<&mut Self>, arg: f64) -> GeneratorState<Self::Yield, Self::Return> {
@@ -172,45 +185,45 @@ impl<'a> Generator<f64> for ActualGen<'a> {
             let this = self.get_mut();
             match this.discriminator {
                 ActualGenDiscriminator::Unresumed => match this.init {
-                    Expr::Num(val) => {
+                    Exp::Num(val) => {
                         this.discriminator = ActualGenDiscriminator::Returned;
                         GeneratorState::Complete(*val)
                     }
-                    Expr::Add(exprs) => {
-                        this.sum_or_expr2 = MaybeUninit::new(SumOrExpr2 { sum: 0.0 });
-                        this.iter = MaybeUninit::new(exprs.iter());
-                        if let Some(expr) = this.iter.assume_init_mut().next() {
+                    Exp::Add(exps) => {
+                        this.sum_or_exp2 = MaybeUninit::new(SumOrExp2 { sum: 0.0 });
+                        this.iter = MaybeUninit::new(exps.iter());
+                        if let Some(exp) = this.iter.assume_init_mut().next() {
                             this.discriminator = ActualGenDiscriminator::Add;
 
-                            GeneratorState::Yielded(expr)
+                            GeneratorState::Yielded(exp)
                         } else {
                             this.discriminator = ActualGenDiscriminator::Returned;
-                            GeneratorState::Complete(this.sum_or_expr2.assume_init_ref().sum)
+                            GeneratorState::Complete(this.sum_or_exp2.assume_init_ref().sum)
                         }
                     }
-                    Expr::Mul(expr1, expr2) => {
+                    Exp::Mul(exp1, exp2) => {
                         this.discriminator = ActualGenDiscriminator::Mul1;
-                        this.sum_or_expr2 = MaybeUninit::new(SumOrExpr2 { expr2 });
-                        GeneratorState::Yielded(expr1)
+                        this.sum_or_exp2 = MaybeUninit::new(SumOrExp2 { exp2 });
+                        GeneratorState::Yielded(exp1)
                     }
                 },
                 ActualGenDiscriminator::Returned => panic!("resuming returned generator"),
                 ActualGenDiscriminator::Panicked => panic!("resuming panicked generator"),
                 ActualGenDiscriminator::Add => {
                     let val = arg;
-                    this.sum_or_expr2.assume_init_mut().sum += val;
-                    if let Some(expr) = this.iter.assume_init_mut().next() {
-                        GeneratorState::Yielded(expr)
+                    this.sum_or_exp2.assume_init_mut().sum += val;
+                    if let Some(exp) = this.iter.assume_init_mut().next() {
+                        GeneratorState::Yielded(exp)
                     } else {
                         this.discriminator = ActualGenDiscriminator::Returned;
-                        GeneratorState::Complete(this.sum_or_expr2.assume_init_ref().sum)
+                        GeneratorState::Complete(this.sum_or_exp2.assume_init_ref().sum)
                     }
                 }
                 ActualGenDiscriminator::Mul1 => {
                     let val1 = arg;
                     this.discriminator = ActualGenDiscriminator::Mul2;
                     this.val1 = MaybeUninit::new(val1);
-                    GeneratorState::Yielded(this.sum_or_expr2.assume_init_ref().expr2)
+                    GeneratorState::Yielded(this.sum_or_exp2.assume_init_ref().exp2)
                 }
                 ActualGenDiscriminator::Mul2 => {
                     let val2 = arg;
@@ -223,15 +236,15 @@ impl<'a> Generator<f64> for ActualGen<'a> {
 }
 
 fn main() {
-    let expr = {
-        use Expr::*;
+    let exp = {
+        use Exp::*;
         Mul(Box::new(Num(2.0)), Box::new(Add(vec![Num(3.0)])))
     };
-    dbg!(std::mem::size_of_val(&expr.eval_generator()));
-    dbg!(std::mem::size_of_val(&SimpleGen::new(&expr)));
+    dbg!(std::mem::size_of_val(&exp.eval_generator()));
+    dbg!(std::mem::size_of_val(&SimpleGen::new(&exp)));
 
-    dbg!(expr.eval_recursive());
-    dbg!(trampoline(Expr::eval_generator)(&expr));
-    dbg!(trampoline(SimpleGen::new)(&expr));
-    dbg!(trampoline(ActualGen::new)(&expr));
+    dbg!(exp.eval_recursive());
+    dbg!(trampoline(Exp::eval_generator)(&exp));
+    dbg!(trampoline(SimpleGen::new)(&exp));
+    dbg!(trampoline(ActualGen::new)(&exp));
 }
