@@ -1,10 +1,41 @@
 #![feature(generators, generator_trait)]
 #![allow(clippy::unnecessary_cast)]
 use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion};
+use std::ops::{Generator, GeneratorState};
+use std::pin::Pin;
 use std::time::Duration;
 
+pub fn trampoline<Arg, Res, Gen>(f: impl Fn(Arg) -> Gen) -> impl Fn(Arg) -> Res
+where
+    Res: Default,
+    Gen: Generator<Res, Yield = Arg, Return = Res> + Unpin,
+{
+    move |arg: Arg| {
+        let mut stack = Vec::new();
+        let mut current = f(arg);
+        let mut res = Res::default();
+
+        loop {
+            match Pin::new(&mut current).resume(res) {
+                GeneratorState::Yielded(arg) => {
+                    stack.push(current);
+                    current = f(arg);
+                    res = Res::default();
+                }
+                GeneratorState::Complete(real_res) => match stack.pop() {
+                    None => return real_res,
+                    Some(top) => {
+                        current = top;
+                        res = real_res;
+                    }
+                },
+            }
+        }
+    }
+}
+
 mod expr {
-    pub type Num = i64;
+    pub type Num = f64;
 
     pub enum Expr {
         Num(Num),
@@ -36,64 +67,59 @@ mod expr {
                 }
             };
             static_assertions::assert_eq_size_val!(gen(self), [0u8; 40]);
-            stack_safe::trampoline(gen)(self)
+            super::trampoline(gen)(self)
         }
 
         pub fn eval_optimal_gen(&self) -> Num {
-            stack_safe::trampoline(optimal_gen::EvalGen::init)(self)
+            super::trampoline(optimal_gen::EvalGen::init)(self)
         }
 
-        pub fn eval_loop_cek(&self) -> Num {
-            enum Ctrl<'a> {
-                Expr(&'a Expr),
-                Value(Num),
-            }
-
+        pub fn eval_loop_cps(&self) -> Num {
             enum Kont<'a> {
-                Add1(&'a Expr),
-                Add2(Num),
-                Mul1(&'a Expr),
-                Mul2(Num),
+                AddL { rhs: &'a Expr },
+                AddR { lhs: Num },
+                MulL { rhs: &'a Expr },
+                MulR { lhs: Num },
             }
 
-            let mut stack = Vec::new();
-            let mut ctrl = Ctrl::Expr(self);
+            let mut kont_stack = Vec::new();
+            let mut expr = self;
             loop {
-                match ctrl {
-                    Ctrl::Expr(e) => match e {
-                        Self::Num(n) => {
-                            ctrl = Ctrl::Value(*n);
-                        }
-                        Self::Add(e1, e2) => {
-                            stack.push(Kont::Add1(e2));
-                            ctrl = Ctrl::Expr(e1);
-                        }
-                        Self::Mul(e1, e2) => {
-                            stack.push(Kont::Mul1(e2));
-                            ctrl = Ctrl::Expr(e1);
-                        }
-                    },
-                    Ctrl::Value(v) => {
-                        if let Some(kont) = stack.pop() {
-                            match kont {
-                                Kont::Add1(e2) => {
-                                    stack.push(Kont::Add2(v));
-                                    ctrl = Ctrl::Expr(e2);
+                match expr {
+                    Self::Num(num) => {
+                        let mut val = *num;
+                        loop {
+                            if let Some(kont) = kont_stack.pop() {
+                                match kont {
+                                    Kont::AddL { rhs } => {
+                                        kont_stack.push(Kont::AddR { lhs: val });
+                                        expr = rhs;
+                                        break;
+                                    }
+                                    Kont::AddR { lhs } => {
+                                        val += lhs;
+                                    }
+                                    Kont::MulL { rhs } => {
+                                        kont_stack.push(Kont::MulR { lhs: val });
+                                        expr = rhs;
+                                        break;
+                                    }
+                                    Kont::MulR { lhs } => {
+                                        val *= lhs;
+                                    }
                                 }
-                                Kont::Add2(v1) => {
-                                    ctrl = Ctrl::Value(v1 + v);
-                                }
-                                Kont::Mul1(e2) => {
-                                    stack.push(Kont::Mul2(v));
-                                    ctrl = Ctrl::Expr(e2);
-                                }
-                                Kont::Mul2(v1) => {
-                                    ctrl = Ctrl::Value(v1 * v);
-                                }
+                            } else {
+                                return val;
                             }
-                        } else {
-                            break v;
                         }
+                    }
+                    Self::Add(lhs, rhs) => {
+                        kont_stack.push(Kont::AddL { rhs });
+                        expr = lhs;
+                    }
+                    Self::Mul(lhs, rhs) => {
+                        kont_stack.push(Kont::MulL { rhs });
+                        expr = lhs;
                     }
                 }
             }
@@ -286,7 +312,7 @@ fn bench_expr_eval(c: &mut Criterion) {
 
     let implementations: [(&str, fn(&Expr) -> Num); 5] = [
         ("recursive", Expr::eval_recursive),
-        ("loop_cek", Expr::eval_loop_cek),
+        ("loop_cps", Expr::eval_loop_cps),
         ("loop_rpn", Expr::eval_loop_rpn),
         ("stack_safe", Expr::eval_stack_safe),
         ("optimal_gen", Expr::eval_optimal_gen),
@@ -315,7 +341,7 @@ fn bench_expr_eval(c: &mut Criterion) {
             let expr = case_func(case_size).0;
             assert_eq!(expr.eval_stack_safe(), expr1_eval);
             assert_eq!(expr.eval_optimal_gen(), expr1_eval);
-            assert_eq!(expr.eval_loop_cek(), expr1_eval);
+            assert_eq!(expr.eval_loop_cps(), expr1_eval);
             std::mem::forget(expr);
         })
         .unwrap();

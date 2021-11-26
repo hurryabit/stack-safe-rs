@@ -16,6 +16,9 @@ clap = "~2.33.3"
 [dev-dependencies]
 criterion = { version = "0.3.5", features = ["html_reports"] }
 
+[profile.release]
+panic = "abort"
+
 [[bench]]
 name = "tarjan"
 harness = false
