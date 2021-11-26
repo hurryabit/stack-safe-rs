@@ -43,10 +43,6 @@ mod expr {
             stack_safe::trampoline(manual::EvalGen::init)(self)
         }
 
-        pub fn eval_like_generated(&self) -> Num {
-            stack_safe::trampoline(like_generated::EvalGen::init)(self)
-        }
-
         pub fn eval_loop(&self) -> Num {
             enum Ctrl<'a> {
                 Expr(&'a Expr),
@@ -176,94 +172,6 @@ mod expr {
         }
     }
 
-    // This module contains a generator for evaluation that resembles the one
-    // produced by the compiler from the `yield` version. In particular, it
-    // takes as much space as the produced one.
-    mod like_generated {
-        use super::*;
-        use std::ops::{Generator, GeneratorState};
-
-        pub enum EvalGenState {
-            Init,
-            Add1,
-            Add2,
-            Mul1,
-            Mul2,
-            Done,
-        }
-
-        pub struct EvalGen<'a> {
-            state: EvalGenState,
-            e0: &'a Expr,
-            e2: &'a Expr,
-            v1_add: Num,
-            v1_mul: Num,
-        }
-
-        static_assertions::assert_eq_size!(EvalGen, [u8; 40]);
-
-        impl<'a> EvalGen<'a> {
-            pub fn init(expr: &'a Expr) -> Self {
-                Self {
-                    state: EvalGenState::Init,
-                    e0: expr,
-                    e2: expr,
-                    v1_add: 0 as Num,
-                    v1_mul: 0 as Num,
-                }
-            }
-        }
-
-        impl<'a> Generator<Num> for EvalGen<'a> {
-            type Yield = &'a Expr;
-            type Return = Num;
-
-            fn resume(
-                self: std::pin::Pin<&mut Self>,
-                value: Num,
-            ) -> std::ops::GeneratorState<Self::Yield, Self::Return> {
-                let this = self.get_mut();
-                match this.state {
-                    EvalGenState::Init => match this.e0 {
-                        Expr::Num(n) => {
-                            this.state = EvalGenState::Done;
-                            GeneratorState::Complete(*n)
-                        }
-                        Expr::Add(e1, e2) => {
-                            this.e2 = e2;
-                            this.state = EvalGenState::Add1;
-                            GeneratorState::Yielded(e1)
-                        }
-                        Expr::Mul(e1, e2) => {
-                            this.e2 = e2;
-                            this.state = EvalGenState::Mul1;
-                            GeneratorState::Yielded(e1)
-                        }
-                    },
-                    EvalGenState::Add1 => {
-                        this.v1_add = value;
-                        this.state = EvalGenState::Add2;
-                        GeneratorState::Yielded(this.e2)
-                    }
-                    EvalGenState::Add2 => {
-                        this.state = EvalGenState::Done;
-                        GeneratorState::Complete(this.v1_add + value)
-                    }
-                    EvalGenState::Mul1 => {
-                        this.v1_mul = value;
-                        this.state = EvalGenState::Mul2;
-                        GeneratorState::Yielded(this.e2)
-                    }
-                    EvalGenState::Mul2 => {
-                        this.state = EvalGenState::Done;
-                        GeneratorState::Complete(this.v1_mul * value)
-                    }
-                    EvalGenState::Done => panic!("Trying to resume completed EvalGen generator."),
-                }
-            }
-        }
-    }
-
     pub mod examples {
         use super::*;
 
@@ -319,11 +227,10 @@ fn bench_expr_eval(c: &mut Criterion) {
     #![allow(clippy::type_complexity)]
     use expr::*;
 
-    let implementations: [(&str, fn(&Expr) -> Num); 5] = [
+    let implementations: [(&str, fn(&Expr) -> Num); 4] = [
         ("recursive", Expr::eval_recursive),
         ("stack_safe", Expr::eval_stack_safe),
         ("manual", Expr::eval_manual),
-        ("like_generated", Expr::eval_like_generated),
         ("loop", Expr::eval_loop),
     ];
 
@@ -349,7 +256,6 @@ fn bench_expr_eval(c: &mut Criterion) {
             let expr = case_func(case_size).0;
             assert_eq!(expr.eval_stack_safe(), expr1_eval);
             assert_eq!(expr.eval_manual(), expr1_eval);
-            assert_eq!(expr.eval_like_generated(), expr1_eval);
             assert_eq!(expr.eval_loop(), expr1_eval);
             std::mem::forget(expr);
         })
