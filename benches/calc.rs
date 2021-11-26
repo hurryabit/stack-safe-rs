@@ -1,4 +1,4 @@
-#![feature(destructuring_assignment, generators, generator_trait)]
+#![feature(generators, generator_trait)]
 #![allow(clippy::unnecessary_cast)]
 use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion};
 use std::time::Duration;
@@ -39,8 +39,8 @@ mod expr {
             stack_safe::trampoline(gen)(self)
         }
 
-        pub fn eval_manual(&self) -> Num {
-            stack_safe::trampoline(manual::EvalGen::init)(self)
+        pub fn eval_optimal_gen(&self) -> Num {
+            stack_safe::trampoline(optimal_gen::EvalGen::init)(self)
         }
 
         pub fn eval_loop(&self) -> Num {
@@ -101,7 +101,7 @@ mod expr {
     }
 
     // This module contains a hand-written generator for evaluation.
-    mod manual {
+    mod optimal_gen {
         use super::*;
         use std::ops::{Generator, GeneratorState};
 
@@ -187,14 +187,21 @@ mod expr {
         }
 
         pub fn triangular(n: usize) -> (Expr, Num) {
-            // let mut expr = Expr::Num(0 as Num);
-            let mut expr = Expr::Num(1 as Num);
-            for _i in 1..n {
-                // expr = Expr::Add(Box::new(expr), Box::new(Expr::Num(i as Num)));
-                expr = Expr::Mul(Box::new(expr), Box::new(Expr::Num(1 as Num)));
+            let mut expr = Expr::Num(0 as Num);
+            for i in 1..=n {
+                expr = Expr::Add(Box::new(expr), Box::new(Expr::Num(i as Num)));
             }
-            // (expr, (n as Num) * (n as Num - 1 as Num) / 2 as Num)
-            (expr, 1 as Num)
+            (expr, (n as Num) * (n as Num + 1 as Num) / 2 as Num)
+        }
+
+        pub fn power(n: usize) -> (Expr, Num) {
+            let mut expr = Expr::Num(1 as Num);
+            let mut eval = 1 as Num;
+            for _ in 0..n {
+                expr = Expr::Mul(Box::new(expr), Box::new(Expr::Num(2 as Num)));
+                eval *= 2 as Num;
+            }
+            (expr, eval)
         }
 
         pub fn complete_tree(n: usize) -> (Expr, Num) {
@@ -229,9 +236,9 @@ fn bench_expr_eval(c: &mut Criterion) {
 
     let implementations: [(&str, fn(&Expr) -> Num); 4] = [
         ("recursive", Expr::eval_recursive),
-        ("stack_safe", Expr::eval_stack_safe),
-        ("manual", Expr::eval_manual),
         ("loop", Expr::eval_loop),
+        ("stack_safe", Expr::eval_stack_safe),
+        ("optimal_gen", Expr::eval_optimal_gen),
     ];
 
     let (simple, simple_eval) = examples::simple();
@@ -239,13 +246,14 @@ fn bench_expr_eval(c: &mut Criterion) {
         assert_eq!(impl_func(&simple), simple_eval);
     }
 
-    let cases: [(&str, fn(usize) -> (Expr, Num), usize); 3] = [
+    let cases: [(&str, fn(usize) -> (Expr, Num), usize); 4] = [
         ("triangular_{size}", examples::triangular, 100_000),
+        ("power_{size}", examples::power, 100_000),
         ("complete_tree_{size}", examples::complete_tree, 18),
         ("mixed_{size}", examples::mixed, 17),
     ];
 
-    let mut group = c.benchmark_group("expr_eval");
+    let mut group = c.benchmark_group(format!("eval_{}", std::any::type_name::<Num>()));
     for (case_name, case_func, case_size) in cases {
         let case_name = &case_name.replace("{size}", &case_size.to_string());
         let (expr1, expr1_eval) = case_func(case_size);
@@ -255,7 +263,7 @@ fn bench_expr_eval(c: &mut Criterion) {
         stack_safe::with_stack_size(10 * 1024, move || {
             let expr = case_func(case_size).0;
             assert_eq!(expr.eval_stack_safe(), expr1_eval);
-            assert_eq!(expr.eval_manual(), expr1_eval);
+            assert_eq!(expr.eval_optimal_gen(), expr1_eval);
             assert_eq!(expr.eval_loop(), expr1_eval);
             std::mem::forget(expr);
         })
@@ -264,7 +272,7 @@ fn bench_expr_eval(c: &mut Criterion) {
         let exprs = (expr1, expr2);
         for (impl_name, impl_func) in implementations {
             group.bench_with_input(
-                BenchmarkId::new(impl_name, case_name),
+                BenchmarkId::new(case_name, impl_name),
                 &exprs,
                 |b, (expr1, expr2)| {
                     b.iter(|| {
