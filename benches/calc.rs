@@ -1,22 +1,25 @@
 #![feature(destructuring_assignment, generators, generator_trait)]
+#![allow(clippy::unnecessary_cast)]
 use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion};
 use std::time::Duration;
 
 mod expr {
+    pub type Num = i64;
+
     pub enum Expr {
-        Num(i64),
+        Num(Num),
         Add(Box<Expr>, Box<Expr>),
         Mul(Box<Expr>, Box<Expr>),
     }
 
     impl Default for Expr {
         fn default() -> Self {
-            Self::Num(0)
+            Self::Num(0 as Num)
         }
     }
 
     impl Expr {
-        pub fn eval_recursive(&self) -> i64 {
+        pub fn eval_recursive(&self) -> Num {
             match self {
                 Self::Num(n) => *n,
                 Self::Add(e1, e2) => e1.eval_recursive() + e2.eval_recursive(),
@@ -24,9 +27,9 @@ mod expr {
             }
         }
 
-        pub fn eval_stack_safe<'a>(&'a self) -> i64 {
+        pub fn eval_stack_safe<'a>(&'a self) -> Num {
             let gen = |e: &'a Self| {
-                move |_: i64| match e {
+                move |_| match e {
                     Self::Num(n) => *n,
                     Self::Add(e1, e2) => (yield e1.as_ref()) + (yield e2.as_ref()),
                     Self::Mul(e1, e2) => (yield e1.as_ref()) * (yield e2.as_ref()),
@@ -36,25 +39,25 @@ mod expr {
             stack_safe::trampoline(gen)(self)
         }
 
-        pub fn eval_manual(&self) -> i64 {
+        pub fn eval_manual(&self) -> Num {
             stack_safe::trampoline(manual::EvalGen::init)(self)
         }
 
-        pub fn eval_like_generated(&self) -> i64 {
+        pub fn eval_like_generated(&self) -> Num {
             stack_safe::trampoline(like_generated::EvalGen::init)(self)
         }
 
-        pub fn eval_loop(&self) -> i64 {
+        pub fn eval_loop(&self) -> Num {
             enum Ctrl<'a> {
                 Expr(&'a Expr),
-                Value(i64),
+                Value(Num),
             }
 
             enum Kont<'a> {
                 Add1(&'a Expr),
-                Add2(i64),
+                Add2(Num),
                 Mul1(&'a Expr),
-                Mul2(i64),
+                Mul2(Num),
             }
 
             let mut stack = Vec::new();
@@ -109,9 +112,9 @@ mod expr {
         pub enum EvalGen<'a> {
             Init(&'a Expr),
             Add1(&'a Expr),
-            Add2(i64),
+            Add2(Num),
             Mul1(&'a Expr),
-            Mul2(i64),
+            Mul2(Num),
             Done,
         }
 
@@ -123,13 +126,13 @@ mod expr {
 
         static_assertions::assert_eq_size!(EvalGen, [u8; 16]);
 
-        impl<'a> Generator<i64> for EvalGen<'a> {
+        impl<'a> Generator<Num> for EvalGen<'a> {
             type Yield = &'a Expr;
-            type Return = i64;
+            type Return = Num;
 
             fn resume(
                 self: std::pin::Pin<&mut Self>,
-                value: i64,
+                value: Num,
             ) -> std::ops::GeneratorState<Self::Yield, Self::Return> {
                 let this = self.get_mut();
                 match this {
@@ -193,8 +196,8 @@ mod expr {
             state: EvalGenState,
             e0: &'a Expr,
             e2: &'a Expr,
-            v1_add: i64,
-            v1_mul: i64,
+            v1_add: Num,
+            v1_mul: Num,
         }
 
         static_assertions::assert_eq_size!(EvalGen, [u8; 40]);
@@ -205,19 +208,19 @@ mod expr {
                     state: EvalGenState::Init,
                     e0: expr,
                     e2: expr,
-                    v1_add: 0,
-                    v1_mul: 0,
+                    v1_add: 0 as Num,
+                    v1_mul: 0 as Num,
                 }
             }
         }
 
-        impl<'a> Generator<i64> for EvalGen<'a> {
+        impl<'a> Generator<Num> for EvalGen<'a> {
             type Yield = &'a Expr;
-            type Return = i64;
+            type Return = Num;
 
             fn resume(
                 self: std::pin::Pin<&mut Self>,
-                value: i64,
+                value: Num,
             ) -> std::ops::GeneratorState<Self::Yield, Self::Return> {
                 let this = self.get_mut();
                 match this.state {
@@ -262,30 +265,40 @@ mod expr {
     }
 
     pub mod examples {
-        use super::Expr;
+        use super::*;
 
-        pub fn simple() -> (Expr, i64) {
+        pub fn simple() -> (Expr, Num) {
             let expr = Expr::Add(
-                Box::new(Expr::Num(1)),
-                Box::new(Expr::Mul(Box::new(Expr::Num(2)), Box::new(Expr::Num(3)))),
+                Box::new(Expr::Num(1 as Num)),
+                Box::new(Expr::Mul(
+                    Box::new(Expr::Num(2 as Num)),
+                    Box::new(Expr::Num(3 as Num)),
+                )),
             );
-            (expr, 7)
+            (expr, 7 as Num)
         }
 
-        pub fn triangular(n: usize) -> (Expr, i64) {
-            let n = n as i64;
-            let mut expr = Expr::Num(0);
-            for i in 1..n {
-                expr = Expr::Add(Box::new(expr), Box::new(Expr::Num(i)));
+        pub fn triangular(n: usize) -> (Expr, Num) {
+            // let mut expr = Expr::Num(0 as Num);
+            let mut expr = Expr::Num(1 as Num);
+            for _i in 1..n {
+                // expr = Expr::Add(Box::new(expr), Box::new(Expr::Num(i as Num)));
+                expr = Expr::Mul(Box::new(expr), Box::new(Expr::Num(1 as Num)));
             }
-            (expr, n * (n - 1) / 2)
+            // (expr, (n as Num) * (n as Num - 1 as Num) / 2 as Num)
+            (expr, 1 as Num)
         }
 
-        pub fn complete_tree(n: usize) -> (Expr, i64) {
-            complete_tree_with(n, || (Expr::Num(1), 1))
+        pub fn complete_tree(n: usize) -> (Expr, Num) {
+            complete_tree_with(n, || {
+                (
+                    Expr::Mul(Box::new(Expr::Num(1 as Num)), Box::new(Expr::Num(1 as Num))),
+                    1 as Num,
+                )
+            })
         }
 
-        pub fn complete_tree_with(n: usize, leaf: impl Fn() -> (Expr, i64)) -> (Expr, i64) {
+        pub fn complete_tree_with(n: usize, leaf: impl Fn() -> (Expr, Num)) -> (Expr, Num) {
             if n == 0 {
                 leaf()
             } else {
@@ -295,7 +308,7 @@ mod expr {
             }
         }
 
-        pub fn mixed(n: usize) -> (Expr, i64) {
+        pub fn mixed(n: usize) -> (Expr, Num) {
             let m = 10 * 2usize.pow(n as u32);
             complete_tree_with(n, || triangular(m))
         }
@@ -306,7 +319,7 @@ fn bench_expr_eval(c: &mut Criterion) {
     #![allow(clippy::type_complexity)]
     use expr::*;
 
-    let implementations: [(&str, fn(&Expr) -> i64); 5] = [
+    let implementations: [(&str, fn(&Expr) -> Num); 5] = [
         ("recursive", Expr::eval_recursive),
         ("stack_safe", Expr::eval_stack_safe),
         ("manual", Expr::eval_manual),
@@ -319,12 +332,11 @@ fn bench_expr_eval(c: &mut Criterion) {
         assert_eq!(impl_func(&simple), simple_eval);
     }
 
-    let cases: [(&str, fn(usize) -> (Expr, i64), usize); 3] = [
+    let cases: [(&str, fn(usize) -> (Expr, Num), usize); 3] = [
         ("triangular_{size}", examples::triangular, 100_000),
-        ("complete_tree_{size}", examples::complete_tree, 20),
+        ("complete_tree_{size}", examples::complete_tree, 18),
         ("mixed_{size}", examples::mixed, 17),
     ];
-
 
     let mut group = c.benchmark_group("expr_eval");
     for (case_name, case_func, case_size) in cases {
@@ -345,12 +357,16 @@ fn bench_expr_eval(c: &mut Criterion) {
 
         let exprs = (expr1, expr2);
         for (impl_name, impl_func) in implementations {
-            group.bench_with_input(BenchmarkId::new(impl_name, case_name), &exprs, |b, (expr1, expr2)| {
-                b.iter(|| {
-                    assert_eq!(impl_func(expr1), expr1_eval);
-                    assert_eq!(impl_func(expr2), expr2_eval);
-                })
-            });
+            group.bench_with_input(
+                BenchmarkId::new(impl_name, case_name),
+                &exprs,
+                |b, (expr1, expr2)| {
+                    b.iter(|| {
+                        assert_eq!(impl_func(expr1), expr1_eval);
+                        assert_eq!(impl_func(expr2), expr2_eval);
+                    })
+                },
+            );
         }
     }
     group.finish();
