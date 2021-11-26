@@ -43,7 +43,7 @@ mod expr {
             stack_safe::trampoline(optimal_gen::EvalGen::init)(self)
         }
 
-        pub fn eval_loop(&self) -> Num {
+        pub fn eval_loop_cek(&self) -> Num {
             enum Ctrl<'a> {
                 Expr(&'a Expr),
                 Value(Num),
@@ -94,6 +94,56 @@ mod expr {
                         } else {
                             break v;
                         }
+                    }
+                }
+            }
+        }
+
+        pub fn eval_loop_rpn(&self) -> Num {
+            enum Item<'a> {
+                Operand(&'a Expr),
+                Add,
+                Mul,
+            }
+
+            let mut current_expr = self;
+            let mut item_stack = Vec::new();
+            let mut value_stack = Vec::new();
+            let mut current_val = 0 as Num;
+
+            loop {
+                match current_expr {
+                    Expr::Num(val) => {
+                        value_stack.push(current_val);
+                        current_val = *val;
+                        loop {
+                            if let Some(item) = item_stack.pop() {
+                                match item {
+                                    Item::Operand(expr) => {
+                                        current_expr = expr;
+                                        break;
+                                    }
+                                    Item::Add => {
+                                        current_val += value_stack.pop().unwrap();
+                                    }
+                                    Item::Mul => {
+                                        current_val *= value_stack.pop().unwrap();
+                                    }
+                                }
+                            } else {
+                                return current_val;
+                            }
+                        }
+                    }
+                    Expr::Add(lhs, rhs) => {
+                        item_stack.push(Item::Add);
+                        item_stack.push(Item::Operand(rhs));
+                        current_expr = lhs;
+                    }
+                    Expr::Mul(lhs, rhs) => {
+                        item_stack.push(Item::Mul);
+                        item_stack.push(Item::Operand(rhs));
+                        current_expr = lhs;
                     }
                 }
             }
@@ -234,9 +284,10 @@ fn bench_expr_eval(c: &mut Criterion) {
     #![allow(clippy::type_complexity)]
     use expr::*;
 
-    let implementations: [(&str, fn(&Expr) -> Num); 4] = [
+    let implementations: [(&str, fn(&Expr) -> Num); 5] = [
         ("recursive", Expr::eval_recursive),
-        ("loop", Expr::eval_loop),
+        ("loop_cek", Expr::eval_loop_cek),
+        ("loop_rpn", Expr::eval_loop_rpn),
         ("stack_safe", Expr::eval_stack_safe),
         ("optimal_gen", Expr::eval_optimal_gen),
     ];
@@ -264,7 +315,7 @@ fn bench_expr_eval(c: &mut Criterion) {
             let expr = case_func(case_size).0;
             assert_eq!(expr.eval_stack_safe(), expr1_eval);
             assert_eq!(expr.eval_optimal_gen(), expr1_eval);
-            assert_eq!(expr.eval_loop(), expr1_eval);
+            assert_eq!(expr.eval_loop_cek(), expr1_eval);
             std::mem::forget(expr);
         })
         .unwrap();
