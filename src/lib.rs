@@ -1,4 +1,10 @@
-#![feature(destructuring_assignment, generators, generator_trait, step_trait)]
+#![feature(
+    destructuring_assignment,
+    generators,
+    generator_trait,
+    step_trait,
+    thread_spawn_unchecked
+)]
 use std::ops::{Generator, GeneratorState};
 use std::pin::Pin;
 use std::thread;
@@ -123,14 +129,15 @@ where
 
 pub fn with_stack_size<T, F>(size: usize, f: F) -> thread::Result<T>
 where
-    T: Send + 'static,
-    F: FnOnce() -> T + Send + 'static,
+    T: Send,
+    F: FnOnce() -> T + Send,
 {
-    std::thread::Builder::new()
-        .stack_size(size)
-        .spawn(f)
-        .unwrap()
-        .join()
+    let result = unsafe {
+        std::thread::Builder::new()
+            .stack_size(size)
+            .spawn_unchecked(f)
+    };
+    result.unwrap().join()
 }
 
 #[cfg(test)]

@@ -221,7 +221,46 @@ impl Expr {
 }
 
 mod examples {
+    use std::fmt::Display;
+
     use super::*;
+    use rand::random;
+
+    pub struct Case {
+        pub expr: Expr,
+        pub eval: Num,
+        pub size: usize,
+    }
+
+    #[derive(Clone, Copy)]
+    pub enum Ops {
+        Add,
+        Mul,
+        Rnd,
+    }
+
+    impl Display for Ops {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            match self {
+                Self::Add => write!(f, "add"),
+                Self::Mul => write!(f, "mul"),
+                Self::Rnd => write!(f, "rnd"),
+            }
+        }
+    }
+
+    // impl Ops {
+    //     fn random(self) -> (&'static dyn Fn (Box<Expr>, Box<Expr>) -> Expr, fn (Num, Num) -> Num) {
+    //         use std::ops::Add;
+
+    //         let add = (&Expr::Add, Num::add);
+    //         match self {
+    //             Ops::Add => add,
+    //             Ops::Mul => todo!(),
+    //             Ops::Both => todo!(),
+    //         }
+    //     }
+    // }
 
     pub fn simple() -> (Expr, Num) {
         let expr = {
@@ -236,59 +275,83 @@ mod examples {
         (expr, 7 as Num)
     }
 
-    pub fn triangular(n: usize) -> (Expr, Num) {
-        let mut expr = Expr::Num(0 as Num);
-        for i in 1..=n {
-            expr = Expr::Add(Box::new(expr), Box::new(Expr::Num(i as Num)));
+    fn random_num() -> Case {
+        let num = random();
+        Case {
+            expr: Expr::Num(num),
+            eval: num,
+            size: 1,
         }
-        (expr, (n as Num) * (n as Num + 1 as Num) / 2 as Num)
     }
 
-    pub fn power(n: usize) -> (Expr, Num) {
-        let mut expr = Expr::Num(1 as Num);
-        let mut eval = 1 as Num;
-        for _ in 0..n {
-            expr = Expr::Mul(Box::new(expr), Box::new(Expr::Num(2 as Num)));
-            eval *= 2 as Num;
-        }
-        (expr, eval)
+    fn random_bin(ops: Ops, lhs: Case, rhs: Case) -> Case {
+        let lhs_expr = Box::new(lhs.expr);
+        let rhs_expr = Box::new(rhs.expr);
+        let add = match ops {
+            Ops::Add => true,
+            Ops::Mul => false,
+            Ops::Rnd => random(),
+        };
+        let (expr, eval) = if add {
+            (Expr::Add(lhs_expr, rhs_expr), lhs.eval + rhs.eval)
+        } else {
+            (Expr::Mul(lhs_expr, rhs_expr), lhs.eval * rhs.eval)
+        };
+        let size = 1 + lhs.size + rhs.size;
+        Case { expr, eval, size }
     }
 
-    pub fn complete(n: usize) -> (Expr, Num) {
-        assert!(n >= 1);
-        tree_with(n - 1, &|| {
-            (
-                Expr::Mul(Box::new(Expr::Num(1 as Num)), Box::new(Expr::Num(1 as Num))),
-                1 as Num,
-            )
-        })
-    }
-
-    pub fn tree_with(n: usize, leaf: &dyn Fn() -> (Expr, Num)) -> (Expr, Num) {
+    fn tree_with(ops: Ops, n: usize, leaf: &dyn Fn() -> Case) -> Case {
         if n == 0 {
             leaf()
         } else {
-            let (lhs, lhs_eval) = tree_with(n - 1, leaf);
-            let (rhs, rhs_eval) = tree_with(n - 1, leaf);
-            (Expr::Add(Box::new(lhs), Box::new(rhs)), lhs_eval + rhs_eval)
+            random_bin(
+                ops,
+                tree_with(ops, n - 1, leaf),
+                tree_with(ops, n - 1, leaf),
+            )
         }
     }
 
-    pub fn mixed(n: usize) -> (Expr, Num) {
-        let m = 2usize.pow(n as u32);
-        tree_with(n, &|| triangular(m))
+    fn branch_with(ops: Ops, n: usize, leaf: &dyn Fn() -> Case) -> Case {
+        let mut expr = leaf();
+        for _ in 0..n {
+            expr = if random::<bool>() {
+                random_bin(ops, expr, leaf())
+            } else {
+                random_bin(ops, leaf(), expr)
+            }
+        }
+        expr
+    }
+
+    pub fn one_branch(ops: Ops) -> Case {
+        branch_with(ops, 512 * 1024 - 1, &random_num)
+    }
+
+    pub fn many_trees(ops: Ops) -> Case {
+        branch_with(ops, 1023, &|| tree_with(ops, 9, &random_num))
+    }
+
+    pub fn one_tree(ops: Ops) -> Case {
+        tree_with(ops, 19, &random_num)
+    }
+
+    pub fn many_branches(ops: Ops) -> Case {
+        tree_with(ops, 10, &|| branch_with(ops, 511, &random_num))
     }
 }
 
 fn bench_expr_eval(c: &mut Criterion) {
     #![allow(clippy::type_complexity)]
+    use examples::*;
 
-    let implementations: [(&str, fn(&Expr) -> Num); 5] = [
+    let implementations: &[(&str, fn(&Expr) -> Num)] = &[
         ("recursive", Expr::eval_recursive),
         ("trampolined", Expr::eval_trampolined),
         ("trampolined_opt", Expr::eval_trampolined_opt),
         ("iterative_cps", Expr::eval_iterative_cps),
-        ("iterative_rpn", Expr::eval_iterative_rpn),
+        // ("iterative_rpn", Expr::eval_iterative_rpn),
     ];
 
     let (simple, simple_eval) = examples::simple();
@@ -296,40 +359,49 @@ fn bench_expr_eval(c: &mut Criterion) {
         assert_eq!(impl_func(&simple), simple_eval);
     }
 
-    let cases: [(&str, fn(usize) -> (Expr, Num), usize); 4] = [
-        ("triangular_{size}", examples::triangular, 200_000),
-        ("power_{size}", examples::power, 200_000),
-        ("complete_{size}", examples::complete, 19),
-        ("mixed_{size}", examples::mixed, 9),
+    let cases: &[(&str, fn(examples::Ops) -> examples::Case)] = &[
+        ("one_tree", examples::one_tree),
+        ("one_branch", examples::one_branch),
+        ("many_trees", examples::many_trees),
+        ("many_branches", examples::many_branches),
     ];
 
-    let mut group = c.benchmark_group(format!("expr_{}", std::any::type_name::<Num>()));
-    for (case_name, case_func, case_size) in cases {
-        let case_name = &case_name.replace("{size}", &case_size.to_string());
-        let (expr1, expr1_eval) = case_func(case_size);
-        let (expr2, expr2_eval) = case_func((2 * (case_size + 1) - 2) / 2);
+    let group_name = format!("expr_{}", std::any::type_name::<Num>());
+    let mut group = c.benchmark_group(&group_name);
+    for (case_name, case_func) in cases {
+        for ops in [Ops::Add, Ops::Rnd] {
+            let case_name = format!("{}_{}", case_name, ops);
+            let case1 = case_func(ops);
+            let case2 = case_func(ops);
+            println!("{}/{} has size {}", group_name, case_name, case1.size);
 
-        assert_eq!(expr1.eval_recursive(), expr1_eval);
-        stack_safe::with_stack_size(10 * 1024, move || {
-            let expr = case_func(case_size).0;
-            assert_eq!(expr.eval_trampolined(), expr1_eval);
-            assert_eq!(expr.eval_trampolined_opt(), expr1_eval);
-            assert_eq!(expr.eval_iterative_cps(), expr1_eval);
-        })
-        .unwrap();
+            assert_eq!(case1.expr.eval_recursive(), case1.eval);
+            stack_safe::with_stack_size(10 * 1024, || {
+                for (impl_name, impl_func) in &implementations[1..] {
+                    assert_eq!(
+                        impl_func(&case1.expr),
+                        case1.eval,
+                        "testing implementation {} on case {}",
+                        impl_name,
+                        case_name,
+                    );
+                }
+            })
+            .unwrap();
 
-        let exprs = (expr1, expr2);
-        for (impl_name, impl_func) in implementations {
-            group.bench_with_input(
-                BenchmarkId::new(impl_name, case_name),
-                &exprs,
-                |b, (expr1, expr2)| {
-                    b.iter(|| {
-                        assert_eq!(impl_func(expr1), expr1_eval);
-                        assert_eq!(impl_func(expr2), expr2_eval);
-                    })
-                },
-            );
+            let cases = (case1, case2);
+            for (impl_name, impl_func) in implementations {
+                group.bench_with_input(
+                    BenchmarkId::new(*impl_name, &case_name),
+                    &cases,
+                    |b, (case1, case2)| {
+                        b.iter(|| {
+                            assert_eq!(impl_func(&case1.expr), case1.eval);
+                            assert_eq!(impl_func(&case2.expr), case2.eval);
+                        })
+                    },
+                );
+            }
         }
     }
     group.finish();
@@ -338,9 +410,9 @@ fn bench_expr_eval(c: &mut Criterion) {
 criterion_group! {
     name = benches;
     config = Criterion::default()
-        .measurement_time(Duration::from_secs(10))
-        .warm_up_time(Duration::from_secs(2))
-        .sample_size(20)
+        .measurement_time(Duration::from_secs(60))
+        .warm_up_time(Duration::from_secs(5))
+        .sample_size(50)
         .configure_from_args();
     targets = bench_expr_eval
 }

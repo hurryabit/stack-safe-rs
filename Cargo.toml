@@ -12,6 +12,7 @@ license = "Apache 2.0"
 [dependencies]
 static_assertions = "1.1.0"
 clap = "~2.33.3"
+rand = "0.8.4"
 
 [dev-dependencies]
 criterion = { version = "0.3.5", features = ["html_reports"] }
